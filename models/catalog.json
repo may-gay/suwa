@@ -1,0 +1,372 @@
+[
+  {
+    "id": "fast-2x",
+    "name": "waifu2x \u00b7 Fast 2\u00d7",
+    "description": "UpConv7 art: a small, fast default for clean line art and everyday reading. Upscales without denoising.",
+    "note": "Bundled \u00b7 low latency",
+    "license": "MIT",
+    "source": "https://github.com/nagadomi/nunif",
+    "model": {
+      "name": "waifu2x \u00b7 Fast 2\u00d7",
+      "file": "fast-2x.onnx",
+      "sha256": "aae44f807e7dbca48f6ee2714fe70167e77f069d2f62e3b827a5b6322bc47561",
+      "scale": 2,
+      "tile": 256,
+      "padding": 14
+    },
+    "downloads": []
+  },
+  {
+    "id": "cunet-2x",
+    "name": "waifu2x \u00b7 CUnet 2\u00d7",
+    "description": "A larger convolutional model for anime illustrations and line art. Upscales without denoising; slower than Fast.",
+    "note": "Balanced detail \u00b7 higher GPU cost",
+    "license": "MIT",
+    "source": "https://github.com/nagadomi/nunif",
+    "model": {
+      "name": "waifu2x \u00b7 CUnet 2\u00d7",
+      "file": "cunet-2x.onnx",
+      "sha256": "0966d74dd0739a20de358de88c8fa4eb6cb8c3489bb0e941da9751ad4dcdf495",
+      "scale": 2,
+      "tile": 256,
+      "padding": 36
+    },
+    "downloads": [
+      {
+        "file": "cunet-2x.onnx",
+        "url": "https://github.com/nagadomi/nunif/releases/download/0.0.0/waifu2x_onnx_models_20250502.zip",
+        "bytes": 5178591,
+        "sha256": "0966d74dd0739a20de358de88c8fa4eb6cb8c3489bb0e941da9751ad4dcdf495",
+        "range": {
+          "offset": 19108989,
+          "length": 4783292,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "swin-art-2x",
+    "name": "waifu2x \u00b7 SwinUNet Art 2\u00d7",
+    "description": "A newer transformer model for digital art, tuned for pixel fidelity. A conservative option for clean color pages and line art.",
+    "note": "Digital art \u00b7 no denoising",
+    "license": "MIT",
+    "source": "https://github.com/nagadomi/nunif",
+    "model": {
+      "name": "waifu2x \u00b7 SwinUNet Art 2\u00d7",
+      "file": "swin-art-2x.onnx",
+      "sha256": "581a69575295f5e082531b1ce6974dc27977576601b1d15c4c89d69b48c6ebef",
+      "scale": 2,
+      "tile": 240,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "swin-art-2x.onnx",
+        "url": "https://github.com/nagadomi/nunif/releases/download/0.0.0/waifu2x_onnx_models_20250502.zip",
+        "bytes": 16727049,
+        "sha256": "581a69575295f5e082531b1ce6974dc27977576601b1d15c4c89d69b48c6ebef",
+        "range": {
+          "offset": 131466388,
+          "length": 14077733,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "swin-scan-2x",
+    "name": "waifu2x \u00b7 SwinUNet Scan 2\u00d7",
+    "description": "The art_scan GAN variant for printed manga scans and captured artwork. Can alter small details, lettering and screentones.",
+    "note": "Printed scans \u00b7 generative restoration",
+    "license": "MIT",
+    "source": "https://github.com/nagadomi/nunif",
+    "model": {
+      "name": "waifu2x \u00b7 SwinUNet Scan 2\u00d7",
+      "file": "swin-scan-2x.onnx",
+      "sha256": "a6d617dd2e6453131779542c31cb44d2b5e4463e2bdbcf1b32fd9e7b4001e4e1",
+      "scale": 2,
+      "tile": 240,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "swin-scan-2x.onnx",
+        "url": "https://github.com/nagadomi/nunif/releases/download/0.0.0/waifu2x_onnx_models_20250502.zip",
+        "bytes": 18905935,
+        "sha256": "a6d617dd2e6453131779542c31cb44d2b5e4463e2bdbcf1b32fd9e7b4001e4e1",
+        "range": {
+          "offset": 572286885,
+          "length": 16107259,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "mangajanai-2x",
+    "name": "MangaJaNai \u00b7 Auto 2\u00d7",
+    "description": "V1 ESRGAN restoration for black-and-white digital manga: JPEG artifacts, moir\u00e9 and damaged halftones. Selects the nearest source-height model from 1200p through 2048p.",
+    "note": "Seven resolution presets \u00b7 B&W pages only \u00b7 community ONNX export",
+    "license": "CC-BY-NC-4.0",
+    "source": "https://github.com/the-database/MangaJaNai",
+    "model": {
+      "name": "MangaJaNai \u00b7 Auto 2\u00d7",
+      "file": "mangajanai-1200.onnx",
+      "sha256": "c985d6b78ed1a659867cd5697ce80743ad9ddd73868f463e69c824f15f169eb0",
+      "scale": 2,
+      "tile": 128,
+      "padding": 32,
+      "variants": [
+        {
+          "height": 1200,
+          "file": "mangajanai-1200.onnx",
+          "sha256": "c985d6b78ed1a659867cd5697ce80743ad9ddd73868f463e69c824f15f169eb0"
+        },
+        {
+          "height": 1300,
+          "file": "mangajanai-1300.onnx",
+          "sha256": "583086ad4ba014d4e02e233b7fb5ded17807dc3bdb867f68730b5a50665dcf68"
+        },
+        {
+          "height": 1400,
+          "file": "mangajanai-1400.onnx",
+          "sha256": "c52ceffe091e640072e936e1e30bef8889ae35aa1ecad71c52efb46bb96d399f"
+        },
+        {
+          "height": 1500,
+          "file": "mangajanai-1500.onnx",
+          "sha256": "329398fcf537697e291c206fb5d44a3c9a8d55d7b777fc3bd437401ba3b3baca"
+        },
+        {
+          "height": 1600,
+          "file": "mangajanai-1600.onnx",
+          "sha256": "214a387e64a71c1e41751453269ee2ff1ee9f33b32429c615dc7ea91238d9ee0"
+        },
+        {
+          "height": 1920,
+          "file": "mangajanai-1920.onnx",
+          "sha256": "1d4becf9357b7f80568f48cd96d63aa120e5ca43964d8132820ae198ba725656"
+        },
+        {
+          "height": 2048,
+          "file": "mangajanai-2048.onnx",
+          "sha256": "ca0477a8c7fd5e694f147ed5b4c40e851ddbde785cb8c4a76d78f35a97cecb4c"
+        }
+      ]
+    },
+    "downloads": [
+      {
+        "file": "mangajanai-1200.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1200p_V1_ESRGAN_70k.onnx",
+        "bytes": 67191396,
+        "sha256": "c985d6b78ed1a659867cd5697ce80743ad9ddd73868f463e69c824f15f169eb0"
+      },
+      {
+        "file": "mangajanai-1300.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1300p_V1_ESRGAN_75k.onnx",
+        "bytes": 67191396,
+        "sha256": "583086ad4ba014d4e02e233b7fb5ded17807dc3bdb867f68730b5a50665dcf68"
+      },
+      {
+        "file": "mangajanai-1400.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1400p_V1_ESRGAN_70k.onnx",
+        "bytes": 67191396,
+        "sha256": "c52ceffe091e640072e936e1e30bef8889ae35aa1ecad71c52efb46bb96d399f"
+      },
+      {
+        "file": "mangajanai-1500.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1500p_V1_ESRGAN_90k.onnx",
+        "bytes": 67191396,
+        "sha256": "329398fcf537697e291c206fb5d44a3c9a8d55d7b777fc3bd437401ba3b3baca"
+      },
+      {
+        "file": "mangajanai-1600.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1600p_V1_ESRGAN_90k.onnx",
+        "bytes": 67191396,
+        "sha256": "214a387e64a71c1e41751453269ee2ff1ee9f33b32429c615dc7ea91238d9ee0"
+      },
+      {
+        "file": "mangajanai-1920.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_1920p_V1_ESRGAN_70k.onnx",
+        "bytes": 67191396,
+        "sha256": "1d4becf9357b7f80568f48cd96d63aa120e5ca43964d8132820ae198ba725656"
+      },
+      {
+        "file": "mangajanai-2048.onnx",
+        "url": "https://huggingface.co/haesslerian/MangaJaNai_V1_ONNX/resolve/2f67ff30209f2e0c75b7c55e6f3ffc3adbc960f7/2x_MangaJaNai_2048p_V1_ESRGAN_95k.onnx",
+        "bytes": 67191396,
+        "sha256": "ca0477a8c7fd5e694f147ed5b4c40e851ddbde785cb8c4a76d78f35a97cecb4c"
+      }
+    ]
+  },
+  {
+    "id": "illustration-denoise-2x",
+    "name": "IllustrationJaNai \u00b7 Denoise 2\u00d7",
+    "description": "V3 denoise, compact SPAN S: cleans JPEG artifacts and noise in color manga pages, covers and digital illustrations.",
+    "note": "Color artwork \u00b7 compact FP16 model",
+    "license": "CC-BY-NC-4.0",
+    "source": "https://github.com/the-database/MangaJaNai",
+    "model": {
+      "name": "IllustrationJaNai \u00b7 Denoise 2\u00d7",
+      "file": "illustration-denoise-2x.onnx",
+      "sha256": "cd0344ebae36281206827954b730e0f944ce961dbbe059a41a083014f3e7c03a",
+      "scale": 2,
+      "tile": 256,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "illustration-denoise-2x.onnx",
+        "url": "https://github.com/the-database/MangaJaNai/releases/download/3.0.0/IllustrationJaNai_V3denoise_onnx.zip",
+        "bytes": 851846,
+        "sha256": "cd0344ebae36281206827954b730e0f944ce961dbbe059a41a083014f3e7c03a",
+        "range": {
+          "offset": 7156715,
+          "length": 776000,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "illustration-detail-2x",
+    "name": "IllustrationJaNai \u00b7 Detail 2\u00d7",
+    "description": "V3 detail, compact SPAN S: restores texture and line detail in color manga pages, covers and illustrations. Can invent or change fine detail.",
+    "note": "Color artwork \u00b7 compact FP16 model",
+    "license": "CC-BY-NC-4.0",
+    "source": "https://github.com/the-database/MangaJaNai",
+    "model": {
+      "name": "IllustrationJaNai \u00b7 Detail 2\u00d7",
+      "file": "illustration-detail-2x.onnx",
+      "sha256": "00b6a70642914371453bec96fbb7087697651c12ae8b0a3dbde5b9b4d82435b1",
+      "scale": 2,
+      "tile": 256,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "illustration-detail-2x.onnx",
+        "url": "https://github.com/the-database/MangaJaNai/releases/download/3.0.0/IllustrationJaNai_V3detail_onnx.zip",
+        "bytes": 851846,
+        "sha256": "00b6a70642914371453bec96fbb7087697651c12ae8b0a3dbde5b9b4d82435b1",
+        "range": {
+          "offset": 7157152,
+          "length": 775895,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "realesrgan-anime-4x",
+    "name": "Real-ESRGAN \u00b7 Anime 6B 4\u00d7",
+    "description": "x4plus_anime_6B: an anime illustration model for degraded color artwork. Restores stronger edges and textures, with a higher inference cost.",
+    "note": "Color illustrations \u00b7 generative restoration",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/xinntao/Real-ESRGAN",
+    "model": {
+      "name": "Real-ESRGAN \u00b7 Anime 6B 4\u00d7",
+      "file": "realesrgan-anime-4x.onnx",
+      "sha256": "e188e709d4ee43c7154c1e981cb37469089311178c01a39b92bd28b39e5d188a",
+      "scale": 4,
+      "tile": 128,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "realesrgan-anime-4x.onnx",
+        "url": "https://github.com/rigaya/HWEnc-onnx-models/releases/download/20260808/onnx_models_20260808_main.zip",
+        "bytes": 17939969,
+        "sha256": "e188e709d4ee43c7154c1e981cb37469089311178c01a39b92bd28b39e5d188a",
+        "range": {
+          "offset": 1429702905,
+          "length": 16633462,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "realesrgan-video-4x",
+    "name": "Real-ESRGAN \u00b7 Anime Video 4\u00d7",
+    "description": "The compact animevideov3 model, trained on animation frames. A faster Real-ESRGAN option for color art; compare small text and screentones.",
+    "note": "Compact network \u00b7 animation training",
+    "license": "BSD-3-Clause",
+    "source": "https://github.com/xinntao/Real-ESRGAN",
+    "model": {
+      "name": "Real-ESRGAN \u00b7 Anime Video 4\u00d7",
+      "file": "realesrgan-video-4x.onnx",
+      "sha256": "364e14238bd86b5e16d05390f01d50c4c590e24f95a2187d9e2dd969157853e4",
+      "scale": 4,
+      "tile": 256,
+      "padding": 24
+    },
+    "downloads": [
+      {
+        "file": "realesrgan-video-4x.onnx",
+        "url": "https://github.com/rigaya/HWEnc-onnx-models/releases/download/20260808/onnx_models_20260808_main.zip",
+        "bytes": 2492902,
+        "sha256": "364e14238bd86b5e16d05390f01d50c4c590e24f95a2187d9e2dd969157853e4",
+        "range": {
+          "offset": 1508505011,
+          "length": 2320614,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "anime4k-2x",
+    "name": "Anime4K \u00b7 CNN S 2\u00d7",
+    "description": "A very small CNN extracted from the official Anime4K upscale shader. Adds crisp edges to clean anime art. This preset runs the CNN through CUDA; it is not the full mpv shader chain.",
+    "note": "Fast display enhancement \u00b7 not scan restoration",
+    "license": "MIT",
+    "source": "https://github.com/bloc97/Anime4K",
+    "model": {
+      "name": "Anime4K \u00b7 CNN S 2\u00d7",
+      "file": "anime4k-2x.onnx",
+      "sha256": "9a4438057856ac09a78f47da523dd8a9547168079fe6a0981dbd30386a2adc89",
+      "scale": 2,
+      "tile": 256,
+      "padding": 8
+    },
+    "downloads": [
+      {
+        "file": "anime4k-2x.onnx",
+        "url": "https://github.com/rigaya/HWEnc-onnx-models/releases/download/20260808/onnx_models_20260808_main.zip",
+        "bytes": 12036,
+        "sha256": "9a4438057856ac09a78f47da523dd8a9547168079fe6a0981dbd30386a2adc89",
+        "range": {
+          "offset": 1270502,
+          "length": 5606,
+          "deflate": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "animesharp-4x",
+    "name": "AnimeSharp \u00b7 4\u00d7",
+    "description": "The original 4\u00d7 AnimeSharp ESRGAN interpolation of UltraSharp and TextSharp. Emphasizes crisp anime edges and lettering; may oversharpen or alter thin lines.",
+    "note": "Large model \u00b7 stronger sharpening",
+    "license": "CC-BY-NC-SA-4.0",
+    "source": "https://huggingface.co/Kim2091/AnimeSharp",
+    "model": {
+      "name": "AnimeSharp \u00b7 4\u00d7",
+      "file": "animesharp-4x.onnx",
+      "sha256": "da3c917439487e0c5b897aae776ce82759dabe8b68a00b0a1fdf5af2f90cc5eb",
+      "scale": 4,
+      "tile": 128,
+      "padding": 32
+    },
+    "downloads": [
+      {
+        "file": "animesharp-4x.onnx",
+        "url": "https://huggingface.co/Kim2091/AnimeSharp/resolve/7696d95ced82b0c1f2a41f6ac73336133f0a90e1/ONNX/4x-AnimeSharp-fp32-opset16.onnx",
+        "bytes": 67002795,
+        "sha256": "da3c917439487e0c5b897aae776ce82759dabe8b68a00b0a1fdf5af2f90cc5eb"
+      }
+    ]
+  }
+]

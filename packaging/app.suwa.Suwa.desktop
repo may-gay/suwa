@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Suwa
+Comment=Native manga reader for Suwayomi
+Exec=suwa
+Icon=app.suwa.Suwa
+Terminal=false
+Categories=Graphics;Viewer;
+Keywords=manga;comic;suwayomi;reader;
+StartupWMClass=suwa

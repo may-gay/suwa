@@ -1,0 +1,35 @@
+pkgname=suwa-git
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Native Linux manga reader for Suwayomi'
+arch=('x86_64')
+license=('MPL-2.0')
+depends=('gcc-libs' 'glibc' 'wayland' 'libxkbcommon' 'vulkan-icd-loader' 'fontconfig' 'libsecret' 'dav1d')
+makedepends=('rust' 'pkgconf')
+optdepends=('cuda: optional neural upscaling' 'cudnn: optional neural upscaling' 'xdg-utils: open model sources and tracker login in your browser')
+options=('!lto')
+
+build() {
+    cd "$startdir/.."
+    cargo build --locked --release --features cuda
+}
+
+check() {
+    cd "$startdir/.."
+    cargo test --locked --all-features
+}
+
+package() {
+    cd "$startdir/.."
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 models/LICENSE.waifu2x "$pkgdir/usr/share/licenses/$pkgname/LICENSE.waifu2x"
+    for model_license in models/licenses/*.txt; do
+        install -Dm644 "$model_license" "$pkgdir/usr/share/licenses/$pkgname/${model_license##*/}"
+    done
+    for font_license in assets/fonts/LICENSE.*; do
+        install -Dm644 "$font_license" "$pkgdir/usr/share/licenses/$pkgname/${font_license##*/}"
+    done
+    install -Dm755 target/release/suwa "$pkgdir/usr/bin/suwa"
+    install -Dm644 packaging/app.suwa.Suwa.desktop "$pkgdir/usr/share/applications/app.suwa.Suwa.desktop"
+    install -Dm644 packaging/app.suwa.Suwa.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/app.suwa.Suwa.svg"
+}

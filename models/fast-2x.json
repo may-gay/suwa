@@ -1,0 +1,8 @@
+{
+  "name": "waifu2x UpConv7 \u00b7 Fast 2\u00d7",
+  "file": "fast-2x.onnx",
+  "sha256": "aae44f807e7dbca48f6ee2714fe70167e77f069d2f62e3b827a5b6322bc47561",
+  "scale": 2,
+  "tile": 256,
+  "padding": 14
+}
