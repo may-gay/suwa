@@ -1,7 +1,7 @@
 use crate::api::Server;
 use crate::ui::{self, button, checkbox, pick_list, text_input};
 use anyhow::Result;
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -382,7 +382,7 @@ impl Options {
                     .width(Length::Fill),
             );
         }
-        scrollable(body).into()
+        ui::scrollable(body).into()
     }
 }
 

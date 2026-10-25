@@ -65,37 +65,27 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 .style(if active { ui::navigation } else { ui::ghost }),
         );
     }
-    nav = nav
-        .push(Space::new().height(Length::Fill))
-        .push(
-            button("Settings")
-                .on_press(Message::OpenSettings(SettingsPage::Main))
-                .width(Length::Fill)
-                .padding([12, 14])
-                .style(
-                    if matches!(
-                        app.screen,
-                        Screen::Settings
-                            | Screen::Categories
-                            | Screen::Connection
-                            | Screen::Backups
-                            | Screen::Tracking
-                    ) || matches!(server_panel, Some(crate::manage::Panel::Extensions))
-                    {
-                        ui::navigation
-                    } else {
-                        ui::ghost
-                    },
-                ),
-        )
-        .push(
-            container(ui::caption(if app.connected {
-                "Connected"
-            } else {
-                "Offline"
-            }))
-            .padding([8, 14]),
-        );
+    nav = nav.push(Space::new().height(Length::Fill)).push(
+        button(text("Settings").size(14))
+            .on_press(Message::OpenSettings(SettingsPage::Main))
+            .width(Length::Fill)
+            .padding([12, 14])
+            .style(
+                if matches!(
+                    app.screen,
+                    Screen::Settings
+                        | Screen::Categories
+                        | Screen::Connection
+                        | Screen::Backups
+                        | Screen::Tracking
+                ) || matches!(server_panel, Some(crate::manage::Panel::Extensions))
+                {
+                    ui::navigation
+                } else {
+                    ui::ghost
+                },
+            ),
+    );
     let content = match app.screen {
         Screen::Manage | Screen::Downloads => app.manager.view().map(Message::Manage),
         Screen::SourceOptions => app.source_options.view().map(Message::SourceOptions),
@@ -198,7 +188,7 @@ fn connection(app: &App) -> Element<'_, Message> {
         .push(checkbox(app.settings.read_only).label("Read-only connection for inspecting an existing server").on_toggle(Message::ReadOnly))
         .push(text("Reading uncached chapters and browsing sources fetches data on the server. Turn off read-only to enable those actions.").size(13))
         .push(row![button(if app.busy{"Connecting…"}else{"Connect"}).on_press_maybe((!app.busy && !app.credential_busy).then_some(Message::Connect)).padding([12,24]),button("Open saved library").on_press(Message::Go(Screen::Library)).style(ui::secondary).padding([12,24])].spacing(12).wrap());
-    scrollable(container(body).padding(28).style(ui::panel).max_width(700))
+    ui::scrollable(container(body).padding(28).style(ui::panel).max_width(700))
         .height(Length::Fill)
         .into()
 }
@@ -289,7 +279,7 @@ fn library(app: &App) -> Element<'_, Message> {
         }
         content = content
             .push(
-                scrollable(sources).direction(scrollable::Direction::Horizontal(
+                ui::scrollable(sources).direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::default(),
                 )),
             )
@@ -323,9 +313,12 @@ fn library(app: &App) -> Element<'_, Message> {
         }
         if !app.categories.is_empty() {
             content = content.push(
-                scrollable(cats).direction(scrollable::Direction::Horizontal(
-                    scrollable::Scrollbar::default(),
-                )),
+                ui::scrollable(cats)
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::hidden(),
+                    ))
+                    .wheel_horizontal()
+                    .width(Length::Fill),
             );
         }
     }
@@ -472,7 +465,7 @@ fn library(app: &App) -> Element<'_, Message> {
         );
     }
     content = content.push(
-        scrollable(
+        ui::scrollable(
             container(grid)
                 .padding(iced::Padding::ZERO.right(16))
                 .width(Length::Fill),
@@ -564,7 +557,7 @@ fn series(app: &App) -> Element<'_, Message> {
     if app.series_details {
         let mut details = column![text(m.genre.join(" · ")).size(12)].spacing(12);
         if let Some(description) = &m.description {
-            details = details.push(scrollable(ui::caption(description)).height(80));
+            details = details.push(ui::scrollable(ui::caption(description)).height(80));
         }
         let mut cats = Row::new().spacing(8);
         for category in &app.categories {
@@ -783,7 +776,7 @@ fn series(app: &App) -> Element<'_, Message> {
             .push(container(entry).padding([0, 8]).width(Length::Fill))
             .push(iced::widget::rule::horizontal(1));
     }
-    body = body.push(scrollable(list).height(Length::Fill));
+    body = body.push(ui::scrollable(list).height(Length::Fill));
     if total > 100 || app.chapter_page > 0 {
         body = body.push(
             row![
@@ -890,7 +883,7 @@ fn categories(app: &App) -> Element<'_, Message> {
             .style(ui::panel),
         );
     }
-    scrollable(container(rows).padding(iced::Padding {
+    ui::scrollable(container(rows).padding(iced::Padding {
         right: 14.0,
         ..Default::default()
     }))
@@ -1252,7 +1245,7 @@ fn settings(app: &App) -> Element<'_, Message> {
             );
         }
     }
-    scrollable(
+    ui::scrollable(
         container(body)
             .padding(iced::Padding::ZERO.right(16))
             .width(Length::Fill),
@@ -1339,7 +1332,7 @@ fn reader_view(app: &App) -> Element<'_, Message> {
             pages = pages.push(text("Loading next chapter…").size(13));
         }
         crate::reader_wheel::ReaderWheel::new(
-            scrollable(container(pages).center_x(Length::Fill))
+            ui::scrollable(container(pages).center_x(Length::Fill))
                 .id("reader")
                 .height(Length::Fill)
                 .on_scroll(|v| Message::Scroll(v.absolute_offset().y, v.bounds().height)),
@@ -1363,7 +1356,7 @@ fn reader_view(app: &App) -> Element<'_, Message> {
             content_height = content_height.max(h);
             pages = pages.push(page_view(r, i, w, h));
         }
-        scrollable(
+        ui::scrollable(
             container(pages)
                 .center_x(app.size.0.max(content_width))
                 .center_y(height.max(content_height)),
@@ -1498,7 +1491,7 @@ fn reader_view(app: &App) -> Element<'_, Message> {
         }
     }
     let bottom_height = ui::reader_bottom_bar_height(app.reader_options);
-    let bottom_bar = container(scrollable(controls).height(Length::Fill))
+    let bottom_bar = container(ui::scrollable(controls).height(Length::Fill))
         .padding([8, 20])
         .width(Length::Fill)
         .height(bottom_height)

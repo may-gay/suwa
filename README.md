@@ -131,6 +131,9 @@ hover highlights. Maple Mono is used throughout, with bundled regular and bold
 fonts for offline rendering. Settings has theme presets, a custom accent, and an OLED background.
 Library filters open from **Filter**. Series metadata and category assignment are
 under **Details**, while chapter search and bulk actions are under **Edit**.
+Scrollbars use thin rounded thumbs that appear while scrolling or hovering over
+their edge, then hide after a short pause. The library's category tabs have no
+scrollbar; hover over the tabs and use the wheel or touchpad to scroll them sideways.
 Bookmark and read-status actions live in each chapter's menu. Reader controls
 show page navigation first, with fit, zoom, direction, and enhancement under **Options**.
 The previous default Suwa palette migrates to Pastel goth on launch; custom accents

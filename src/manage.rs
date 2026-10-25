@@ -1,7 +1,7 @@
 use crate::ui::{self, button, text_input};
 use crate::{api::Server, storage::atomic_write};
 use anyhow::Result;
-use iced::widget::{Column, Space, column, container, row, scrollable, text};
+use iced::widget::{Column, Space, column, container, row, text};
 use iced::{Element, Length, Task};
 use serde_json::{Value, json};
 
@@ -205,7 +205,7 @@ impl Manager {
                         .style(ui::secondary),
                     );
                 }
-                body = body.push(scrollable(rows).height(Length::Fill));
+                body = body.push(ui::scrollable(rows).height(Length::Fill));
             }
             Panel::Extensions => {
                 body = body.push(
@@ -277,7 +277,7 @@ impl Manager {
                     }
                     rows = rows.push(container(line).padding(12).style(ui::panel));
                 }
-                body = body.push(scrollable(rows).height(Length::Fill));
+                body = body.push(ui::scrollable(rows).height(Length::Fill));
             }
             Panel::ServerDownloads => {
                 body = body.push(
@@ -318,7 +318,7 @@ impl Manager {
                         );
                     }
                 }
-                body = body.push(scrollable(rows).height(Length::Fill));
+                body = body.push(ui::scrollable(rows).height(Length::Fill));
             }
             Panel::Trackers => {
                 for t in nodes(&self.data, "trackers") {

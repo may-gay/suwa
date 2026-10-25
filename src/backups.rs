@@ -1,6 +1,6 @@
 use crate::api::Server;
 use crate::ui::{self, button, checkbox, text_input};
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{column, container, row, text};
 use iced::{Element, Task};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
@@ -311,6 +311,6 @@ impl Backups {
         if self.confirm {
             body=body.push(container(column![text("Restore the selected contents into your connected Suwayomi server? This changes server data."),row![button("Restore").on_press(Msg::Restore).style(ui::danger),button("Cancel").on_press(Msg::Confirm(false))].spacing(12)].spacing(12)).padding(16).style(ui::panel));
         }
-        scrollable(body).into()
+        ui::scrollable(body).into()
     }
 }

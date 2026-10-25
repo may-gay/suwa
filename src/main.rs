@@ -10,6 +10,7 @@ mod manage;
 mod model_catalog;
 mod reader;
 mod reader_wheel;
+mod scroll_area;
 mod source_options;
 mod storage;
 mod tracking;

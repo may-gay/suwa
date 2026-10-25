@@ -1,8 +1,64 @@
+pub use crate::scroll_area::scrollable;
 use iced::widget::{
     self, button as b, checkbox as c, container, pick_list as p, slider as s, text, text_input as t,
 };
 use iced::{Background, Border, Color, Element, Font, Shadow, Theme, Vector, gradient};
 use std::borrow::Borrow;
+
+pub fn scroll_style(
+    theme: &Theme,
+    status: widget::scrollable::Status,
+    scrolling: bool,
+) -> widget::scrollable::Style {
+    use widget::scrollable::{Rail, Scroller, Status};
+    let p = colors(theme);
+    let (horizontal, vertical) = match status {
+        Status::Hovered {
+            is_horizontal_scrollbar_hovered,
+            is_vertical_scrollbar_hovered,
+            ..
+        } => (
+            is_horizontal_scrollbar_hovered,
+            is_vertical_scrollbar_hovered,
+        ),
+        Status::Dragged {
+            is_horizontal_scrollbar_dragged,
+            is_vertical_scrollbar_dragged,
+            ..
+        } => (
+            is_horizontal_scrollbar_dragged,
+            is_vertical_scrollbar_dragged,
+        ),
+        Status::Active { .. } => (false, false),
+    };
+    let rail = |hovered| Rail {
+        background: None,
+        border: Border::default(),
+        scroller: Scroller {
+            background: alpha(
+                p.accent,
+                if hovered {
+                    0.85
+                } else if scrolling {
+                    0.45
+                } else {
+                    0.0
+                },
+            )
+            .into(),
+            border: Border {
+                radius: 999.0.into(),
+                ..Default::default()
+            },
+        },
+    };
+    widget::scrollable::Style {
+        vertical_rail: rail(vertical),
+        horizontal_rail: rail(horizontal),
+        gap: None,
+        ..widget::scrollable::default(theme, status)
+    }
+}
 
 pub const BODY: Font = Font::with_name("Maple Mono");
 pub const DISPLAY: Font = Font {

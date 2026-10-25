@@ -1,7 +1,7 @@
 use crate::ui::{self, button, checkbox, pick_list, text_input};
 use crate::{api::Server, domain::Manga};
 use anyhow::{Context, Result, ensure};
-use iced::widget::{column, container, row, scrollable, text};
+use iced::widget::{column, container, row, text};
 use iced::{Element, Length, Task};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -366,7 +366,7 @@ impl Tracking {
                 },
             ));
         }
-        body = body.push(scrollable(tabs).direction(
+        body = body.push(ui::scrollable(tabs).direction(
             iced::widget::scrollable::Direction::Horizontal(Default::default()),
         ));
         if self.busy {
@@ -408,7 +408,7 @@ impl Tracking {
                         button("Sign in").on_press_maybe((!self.busy).then_some(Msg::Credentials)),
                     );
             }
-            return scrollable(body).into();
+            return ui::scrollable(body).into();
         }
         body = body.push(row![
             text("Connected").width(Length::Fill),
@@ -545,7 +545,7 @@ impl Tracking {
                 );
             }
         }
-        scrollable(body).into()
+        ui::scrollable(body).into()
     }
 }
 pub async fn load(server: &Server, manga: Option<i64>) -> Result<(Vec<Tracker>, Vec<Record>)> {
