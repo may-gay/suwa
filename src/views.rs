@@ -890,7 +890,12 @@ fn categories(app: &App) -> Element<'_, Message> {
             .style(ui::panel),
         );
     }
-    scrollable(rows).width(Length::Fill).into()
+    scrollable(container(rows).padding(iced::Padding {
+        right: 14.0,
+        ..Default::default()
+    }))
+    .width(Length::Fill)
+    .into()
 }
 fn settings_link<'a>(title: &'a str, detail: &'a str, message: Message) -> Element<'a, Message> {
     button(
