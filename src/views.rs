@@ -4,7 +4,9 @@ use crate::{
     domain::*,
     reader::Reader,
 };
-use iced::widget::{Column, Row, Space, column, container, image, row, scrollable, text};
+use iced::widget::{
+    Column, Row, Space, Stack, column, container, image, pin, row, scrollable, text,
+};
 use iced::{Alignment, Element, Length};
 
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -16,7 +18,20 @@ pub fn view(app: &App) -> Element<'_, Message> {
     } else {
         None
     };
-    let mut nav = column![ui::heading("suwa").size(24), Space::new().height(20)].spacing(6);
+    static LOGO: std::sync::LazyLock<iced::widget::image::Handle> =
+        std::sync::LazyLock::new(|| {
+            iced::widget::image::Handle::from_bytes(
+                include_bytes!("../packaging/app.suwa.Suwa.png").as_slice(),
+            )
+        });
+    let logo = image(LOGO.clone()).width(42).height(42);
+    let mut nav = column![
+        row![logo, ui::heading("suwa").size(24)]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        Space::new().height(20)
+    ]
+    .spacing(6);
     for (label, message, active) in [
         (
             "Library",
@@ -232,6 +247,7 @@ fn library(app: &App) -> Element<'_, Message> {
     } else {
         let filtered = app.only_unread
             || app.only_bookmarked
+            || app.show_hidden_categories
             || app.library_status != LibraryStatus::All
             || app.settings.reverse_sort;
         content.push(
@@ -283,14 +299,16 @@ fn library(app: &App) -> Element<'_, Message> {
                     .on_toggle(Message::Latest),
             );
     } else {
-        let mut cats = row![
-            button("All titles")
-                .on_press(Message::Shelf(None))
-                .style(ui::ghost)
-        ]
+        let mut cats = row![button("All titles").on_press(Message::Shelf(None)).style(
+            if app.shelf.is_none() {
+                ui::primary
+            } else {
+                ui::ghost
+            }
+        )]
         .spacing(8);
         for c in &app.categories {
-            if app.hidden_categories.contains(&c.id) {
+            if !app.show_hidden_categories && app.hidden_categories.contains(&c.id) {
                 continue;
             }
             cats = cats.push(
@@ -336,6 +354,9 @@ fn library(app: &App) -> Element<'_, Message> {
                         checkbox(app.only_bookmarked)
                             .label("Bookmarked")
                             .on_toggle(Message::OnlyBookmarked),
+                        checkbox(app.show_hidden_categories)
+                            .label("Show hidden categories")
+                            .on_toggle(Message::ShowHiddenCategories),
                         checkbox(app.settings.reverse_sort)
                             .label("Reverse order")
                             .on_toggle(Message::ReverseSort),
@@ -354,12 +375,16 @@ fn library(app: &App) -> Element<'_, Message> {
     }
     let items = app.filtered();
     let total = items.len();
-    let visible: Vec<_> = items
-        .into_iter()
-        .skip(app.grid_page * 24)
-        .take(24)
-        .collect();
-    let cols = (((app.size.0 - 224.0) / 168.0) as usize).clamp(2, 10);
+    let visible: Vec<_> = if browse {
+        items
+            .into_iter()
+            .skip(app.grid_page * 24)
+            .take(24)
+            .collect()
+    } else {
+        items
+    };
+    let cols = app.grid_columns();
     let mut grid = Column::new().spacing(18).width(Length::Fill);
     for chunk in visible.chunks(cols) {
         let mut line = Row::new().spacing(16);
@@ -436,7 +461,7 @@ fn library(app: &App) -> Element<'_, Message> {
                     text(if browse {
                         "Sources are managed by your Suwayomi server."
                     } else if !app.hidden_categories.is_empty() {
-                        "Check your filters, or unhide a category in Settings."
+                        "Search for a title, or enable Show hidden categories in Filter."
                     } else {
                         "Connect a server, or add a series from Browse."
                     })
@@ -452,9 +477,15 @@ fn library(app: &App) -> Element<'_, Message> {
                 .padding(iced::Padding::ZERO.right(16))
                 .width(Length::Fill),
         )
+        .id("library-grid")
         .width(Length::Fill)
-        .height(Length::Fill),
+        .height(Length::Fill)
+        .on_scroll(|v| Message::GridScroll(v.absolute_offset().y, v.bounds().height)),
     );
+    if !browse {
+        content = content.push(text(format!("{} titles", total)).size(12));
+        return content.into();
+    }
     let mut footer = row![
         button("Previous")
             .on_press_maybe((app.grid_page > 0).then_some(Message::NextGrid(-1)))
@@ -479,10 +510,10 @@ fn series(app: &App) -> Element<'_, Message> {
         return text("Choose a series.").into();
     };
     let first = app
-        .chapters
-        .iter()
+        .reading_chapters()
+        .into_iter()
         .find(|c| !c.is_read)
-        .or(app.chapters.first())
+        .or_else(|| app.reading_chapters().first().copied())
         .map(|c| c.id);
     let mut info = column![ui::heading(&m.title).size(24)]
         .spacing(12)
@@ -608,6 +639,36 @@ fn series(app: &App) -> Element<'_, Message> {
             .align_y(Alignment::Center)
         ]
         .spacing(12);
+        tools = tools.push(
+            checkbox(app.chapter_options.deduplicate)
+                .label("Deduplicate chapters")
+                .on_toggle(Message::ChapterDeduplicate),
+        );
+        if app.chapter_options.deduplicate {
+            let group = app
+                .chapter_options
+                .preferred_group
+                .as_ref()
+                .map(|name| crate::chapter_list::Group::Named(name.clone()))
+                .unwrap_or(crate::chapter_list::Group::Automatic);
+            tools = tools
+                .push(
+                    row![
+                        text("Preferred release group").size(12),
+                        pick_list(
+                            crate::chapter_list::groups(&app.chapters),
+                            Some(group),
+                            Message::ChapterGroup,
+                        )
+                    ]
+                    .spacing(12)
+                    .align_y(Alignment::Center),
+                )
+                .push(
+                    text("Keeps read and in-progress copies; fills missing chapters from other groups.")
+                        .size(12),
+                );
+        }
         if !app.chapter_selection.is_empty() {
             tools = tools.push(
                 row![
@@ -626,6 +687,10 @@ fn series(app: &App) -> Element<'_, Message> {
         body = body.push(container(tools).padding(16).style(ui::inset));
     }
     let filtered = app.filtered_chapters();
+    let hidden = app.chapters.len() - app.reading_chapters().len();
+    if hidden > 0 {
+        body = body.push(ui::caption(format!("{hidden} duplicate chapters hidden")));
+    }
     let total = filtered.len();
     let mut list = Column::new().spacing(2);
     for chapter in filtered.into_iter().skip(app.chapter_page * 100).take(100) {
@@ -741,7 +806,8 @@ fn series(app: &App) -> Element<'_, Message> {
 fn categories(app: &App) -> Element<'_, Message> {
     let mut rows = column![
         ui::heading("Categories").size(28),
-        ui::caption("Hidden categories and their manga stay out of your library and library search on this device. Uncheck here to show them again."),
+        ui::caption("Choose which categories show in All titles. A title in any unchecked category is left out. Its category tabs stay available."),
+        ui::caption("Hidden categories can be revealed through search or Filter → Show hidden categories. All titles selections still apply. Saved on this device per server account."),
         row![
             text_input("New category", &app.category_name)
                 .on_input(Message::CategoryName)
@@ -751,7 +817,8 @@ fn categories(app: &App) -> Element<'_, Message> {
         ]
         .spacing(12)
     ]
-    .spacing(16);
+    .spacing(16)
+    .width(Length::Fill);
     if app.category_delete.is_some() {
         rows = rows.push(
             column![
@@ -774,6 +841,9 @@ fn categories(app: &App) -> Element<'_, Message> {
                 container(
                     column![
                         text(&c.name),
+                        checkbox(!app.all_titles_excluded.contains(&id))
+                            .label("Show in All titles")
+                            .on_toggle(move |value| Message::CategoryInAllTitles(id, value)),
                         checkbox(app.hidden_categories.contains(&id))
                             .label("Hide category and its manga")
                             .on_toggle(move |value| Message::HideCategory(id, value))
@@ -789,11 +859,11 @@ fn categories(app: &App) -> Element<'_, Message> {
         rows = rows.push(
             container(
                 column![
+                    text_input("Category name", &c.name)
+                        .on_input(move |v| Message::RenameCategory(id, v))
+                        .on_submit(Message::SaveCategory(id))
+                        .padding(10),
                     row![
-                        text_input("Category name", &c.name)
-                            .on_input(move |v| Message::RenameCategory(id, v))
-                            .on_submit(Message::SaveCategory(id))
-                            .padding(10),
                         button("Save").on_press(Message::SaveCategory(id)),
                         button("Up").on_press(Message::MoveCategory(id, -1)),
                         button("Down").on_press(Message::MoveCategory(id, 1)),
@@ -806,6 +876,9 @@ fn categories(app: &App) -> Element<'_, Message> {
                     checkbox(c.default)
                         .label("Add new library entries to this category")
                         .on_toggle(move |v| Message::DefaultCategory(id, v)),
+                    checkbox(!app.all_titles_excluded.contains(&id))
+                        .label("Show in All titles")
+                        .on_toggle(move |value| Message::CategoryInAllTitles(id, value)),
                     checkbox(app.hidden_categories.contains(&id))
                         .label("Hide category and its manga")
                         .on_toggle(move |value| Message::HideCategory(id, value))
@@ -817,7 +890,7 @@ fn categories(app: &App) -> Element<'_, Message> {
             .style(ui::panel),
         );
     }
-    scrollable(rows).into()
+    scrollable(rows).width(Length::Fill).into()
 }
 fn settings_link<'a>(title: &'a str, detail: &'a str, message: Message) -> Element<'a, Message> {
     button(
@@ -1058,7 +1131,7 @@ fn settings(app: &App) -> Element<'_, Message> {
                         ),
                         settings_link(
                             "Categories",
-                            "Organize and hide library categories",
+                            "Choose All titles categories and organize your library",
                             Message::Go(Screen::Categories)
                         ),
                         settings_link(
@@ -1125,6 +1198,7 @@ fn settings(app: &App) -> Element<'_, Message> {
                         .label("Incognito reading")
                         .on_toggle(Message::Incognito),
                     ui::caption("← / →  Turn pages     Space  Next page"),
+                    ui::caption("Webtoon: middle click, then move up or down to autoscroll"),
                     ui::caption("F11  Fullscreen     H  Hide controls     Esc  Back"),
                 ]
                 .spacing(14),
@@ -1182,42 +1256,42 @@ fn settings(app: &App) -> Element<'_, Message> {
     .into()
 }
 fn reader_view(app: &App) -> Element<'_, Message> {
-    let mut body = Column::new().spacing(0);
-    if app.chrome {
-        body = body.push(
-            container(
-                row![
-                    button("Back")
-                        .on_press(Message::Go(Screen::Series))
-                        .style(ui::ghost),
-                    text(
-                        app.selected
-                            .as_ref()
-                            .map(|m| m.title.as_str())
-                            .unwrap_or("Reader")
-                    )
-                    .size(15)
-                    .width(Length::Fill),
-                    button(if app.reader_options {
-                        "Done"
-                    } else {
-                        "Options"
-                    })
-                    .on_press(Message::ToggleReaderOptions)
-                    .style(ui::ghost),
-                    button("Hide")
-                        .on_press(Message::ToggleChrome)
-                        .style(ui::ghost)
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
+    let top_bar = container(
+        row![
+            button("Back")
+                .on_press(Message::Go(Screen::Series))
+                .style(ui::ghost),
+            text(
+                app.selected
+                    .as_ref()
+                    .map(|m| m.title.as_str())
+                    .unwrap_or("Reader")
             )
-            .padding(12)
-            .style(ui::reader_bar),
-        );
-    }
+            .size(15)
+            .width(Length::Fill),
+            button(if app.reader_options {
+                "Done"
+            } else {
+                "Options"
+            })
+            .on_press(Message::ToggleReaderOptions)
+            .style(ui::ghost),
+            button(if app.chrome { "Hide" } else { "Pin" })
+                .on_press(Message::ToggleChrome)
+                .style(ui::ghost)
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+    )
+    .padding(12)
+    .width(Length::Fill)
+    .height(ui::READER_TOP_BAR_HEIGHT)
+    .style(ui::reader_bar);
     let Some(r) = &app.reader else {
-        return body
+        return Stack::new()
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .clip(true)
             .push(
                 container(text(if app.busy {
                     "Opening chapter…"
@@ -1227,6 +1301,7 @@ fn reader_view(app: &App) -> Element<'_, Message> {
                 .center_x(Length::Fill)
                 .center_y(Length::Fill),
             )
+            .push(pin(top_bar).y(-ui::READER_TOP_BAR_HEIGHT * (1.0 - app.top_chrome)))
             .into();
     };
     let area: Element<'_, Message> = if r.mode.strip() {
@@ -1258,20 +1333,18 @@ fn reader_view(app: &App) -> Element<'_, Message> {
         } else if r.append_loading.is_some() {
             pages = pages.push(text("Loading next chapter…").size(13));
         }
-        scrollable(container(pages).center_x(Length::Fill))
-            .id("reader")
-            .height(Length::Fill)
-            .on_scroll(|v| Message::Scroll(v.absolute_offset().y, v.bounds().height))
-            .into()
+        crate::reader_wheel::ReaderWheel::new(
+            scrollable(container(pages).center_x(Length::Fill))
+                .id("reader")
+                .height(Length::Fill)
+                .on_scroll(|v| Message::Scroll(v.absolute_offset().y, v.bounds().height)),
+        )
+        .autoscroll_active(app.reader_autoscroll_anchor.is_some())
+        .into()
     } else {
         let count = if app.settings.double_page { 2 } else { 1 };
         let width = (app.size.0 - 32.0) / count as f32;
-        let height = app.size.1
-            - if app.chrome {
-                ui::reader_chrome_height(app.reader_options)
-            } else {
-                20.0
-            };
+        let height = app.size.1;
         let mut indexes: Vec<_> = (r.current..(r.current + count).min(r.urls.len())).collect();
         if r.mode == ReadingMode::RightToLeft {
             indexes.reverse();
@@ -1298,74 +1371,147 @@ fn reader_view(app: &App) -> Element<'_, Message> {
         .height(Length::Fill)
         .into()
     };
-    body = body.push(area);
-    if app.chrome {
-        let mut controls = column![
-            row![
-                button("‹").on_press(Message::Step(-1)).style(ui::ghost),
-                slider(
-                    0.0..=r.span_at(r.current).count.saturating_sub(1).max(1) as f32,
-                    r.local_page() as f32,
-                    move |v| Message::Jump(v + r.span_at(r.current).start as f32)
-                )
-                .step(1.0_f32),
-                text(format!(
-                    "{} / {}",
-                    r.local_page() + 1,
-                    r.span_at(r.current).count
-                ))
-                .size(12),
-                button("›").on_press(Message::Step(1)).style(ui::ghost)
-            ]
-            .spacing(16)
-            .align_y(Alignment::Center)
+    let mut controls = column![
+        row![
+            button("‹").on_press(Message::Step(-1)).style(ui::ghost),
+            slider(
+                0.0..=r.span_at(r.current).count.saturating_sub(1).max(1) as f32,
+                r.local_page() as f32,
+                move |v| Message::Jump(v + r.span_at(r.current).start as f32)
+            )
+            .step(1.0_f32),
+            text(format!(
+                "{} / {}",
+                r.local_page() + 1,
+                r.span_at(r.current).count
+            ))
+            .size(12),
+            button("›").on_press(Message::Step(1)).style(ui::ghost)
         ]
-        .spacing(12);
-        if app.reader_options {
-            controls = controls
-                .push(
-                    row![
-                        pick_list(ReadingMode::ALL, Some(app.settings.mode), Message::Mode),
-                        pick_list(Fit::ALL, Some(r.fit), Message::Fit),
-                        button("Fullscreen")
-                            .on_press(Message::Fullscreen)
-                            .style(ui::ghost)
-                    ]
-                    .spacing(12)
-                    .wrap(),
+        .spacing(16)
+        .align_y(Alignment::Center)
+    ]
+    .spacing(10);
+    if app.reader_options {
+        controls = controls
+            .push(
+                row![
+                    pick_list(ReadingMode::ALL, Some(app.settings.mode), Message::Mode),
+                    pick_list(Fit::ALL, Some(r.fit), Message::Fit),
+                    button("Fullscreen")
+                        .on_press(Message::Fullscreen)
+                        .style(ui::ghost)
+                ]
+                .spacing(12)
+                .wrap(),
+            )
+            .push(
+                row![
+                    button("−")
+                        .on_press(Message::Zoom(r.zoom - 0.25))
+                        .style(ui::ghost),
+                    text(format!("{}%", (r.zoom * 100.0) as u32)).size(12),
+                    button("+")
+                        .on_press(Message::Zoom(r.zoom + 0.25))
+                        .style(ui::ghost),
+                    checkbox(app.settings.double_page)
+                        .label("Spread")
+                        .on_toggle(Message::Double),
+                    checkbox(app.settings.upscale)
+                        .label("Upscale")
+                        .on_toggle(Message::Upscale),
+                    checkbox(app.incognito)
+                        .label("Incognito")
+                        .on_toggle(Message::Incognito)
+                ]
+                .spacing(16)
+                .align_y(Alignment::Center)
+                .wrap(),
+            );
+        let preset = app.model_choice;
+        let directory = app.model_directory();
+        let installed = preset.installed(&directory);
+        let selected =
+            std::path::Path::new(&app.settings.model_path) == preset.manifest(&directory);
+        let action = if installed {
+            Message::SelectModel(preset.manifest(&directory).to_string_lossy().into_owned())
+        } else {
+            Message::InstallModel
+        };
+        controls = controls.push(
+            row![
+                text("Model").size(12),
+                pick_list(
+                    crate::model_catalog::presets().iter().collect::<Vec<_>>(),
+                    Some(preset),
+                    Message::PreviewModel,
                 )
-                .push(
-                    row![
-                        button("−")
-                            .on_press(Message::Zoom(r.zoom - 0.25))
-                            .style(ui::ghost),
-                        text(format!("{}%", (r.zoom * 100.0) as u32)).size(12),
-                        button("+")
-                            .on_press(Message::Zoom(r.zoom + 0.25))
-                            .style(ui::ghost),
-                        checkbox(app.settings.double_page)
-                            .label("Spread")
-                            .on_toggle(Message::Double),
-                        checkbox(app.settings.upscale)
-                            .label("Upscale")
-                            .on_toggle(Message::Upscale),
-                        checkbox(app.incognito)
-                            .label("Incognito")
-                            .on_toggle(Message::Incognito)
-                    ]
-                    .spacing(16)
-                    .align_y(Alignment::Center)
-                    .wrap(),
-                );
+                .width(260),
+                button(if selected {
+                    "Selected"
+                } else if installed {
+                    "Use"
+                } else {
+                    "Install"
+                })
+                .on_press_maybe((!selected && app.model_install.is_none()).then_some(action))
+                .style(ui::secondary),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .wrap(),
+        );
+        let summary = preset
+            .description
+            .split('.')
+            .next()
+            .unwrap_or(&preset.description);
+        let summary = if summary.chars().count() > 86 {
+            format!("{}…", summary.chars().take(85).collect::<String>())
+        } else {
+            summary.to_owned()
+        };
+        controls = controls.push(text(summary).size(11));
+        if let Some((_, progress)) = &app.model_install {
+            let done = progress.done.load(std::sync::atomic::Ordering::Relaxed);
+            controls = controls.push(
+                row![
+                    ui::caption(format!(
+                        "Installing · {:.1} / {:.1} MiB",
+                        done as f64 / 1048576.0,
+                        progress.total as f64 / 1048576.0
+                    )),
+                    button("Cancel")
+                        .on_press(Message::CancelModelInstall)
+                        .style(ui::ghost)
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            );
+        } else if !app.model_status.is_empty() {
+            controls = controls.push(text(&app.model_status).size(11));
         }
-        body = body.push(container(controls).padding([12, 20]).style(ui::reader_bar));
     }
-    if app.chrome
-        && let Some(notice) = &r.notice
-    {
-        body = body.push(container(text(notice).size(12)).padding(10));
+    let bottom_height = ui::reader_bottom_bar_height(app.reader_options);
+    let bottom_bar = container(scrollable(controls).height(Length::Fill))
+        .padding([8, 20])
+        .width(Length::Fill)
+        .height(bottom_height)
+        .style(ui::reader_bar);
+    let mut layers = Stack::new()
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .clip(true)
+        .push(area)
+        .push(pin(top_bar).y(-ui::READER_TOP_BAR_HEIGHT * (1.0 - app.top_chrome)))
+        .push(pin(bottom_bar).y(app.size.1 - bottom_height * app.bottom_chrome));
+    if let Some(notice) = &r.notice {
+        layers = layers.push(
+            pin(container(text(notice).size(12)).padding(10))
+                .y((app.size.1 - bottom_height * app.bottom_chrome - 40.0).max(0.0)),
+        );
     }
-    body.height(Length::Fill).into()
+    layers.into()
 }
 fn page_view(r: &Reader, i: usize, w: f32, h: f32) -> Element<'_, Message> {
     if let Some(img) = r.images.get(&i) {

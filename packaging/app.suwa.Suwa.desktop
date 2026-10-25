@@ -7,4 +7,4 @@ Icon=app.suwa.Suwa
 Terminal=false
 Categories=Graphics;Viewer;
 Keywords=manga;comic;suwayomi;reader;
-StartupWMClass=suwa
+StartupWMClass=app.suwa.Suwa

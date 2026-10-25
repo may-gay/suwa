@@ -31,5 +31,5 @@ package() {
     done
     install -Dm755 target/release/suwa "$pkgdir/usr/bin/suwa"
     install -Dm644 packaging/app.suwa.Suwa.desktop "$pkgdir/usr/share/applications/app.suwa.Suwa.desktop"
-    install -Dm644 packaging/app.suwa.Suwa.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/app.suwa.Suwa.svg"
+    install -Dm644 packaging/app.suwa.Suwa.png "$pkgdir/usr/share/pixmaps/app.suwa.Suwa.png"
 }

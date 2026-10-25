@@ -1,6 +1,7 @@
 mod api;
 mod app;
 mod backups;
+mod chapter_list;
 mod cli;
 mod credentials;
 mod domain;
@@ -8,6 +9,7 @@ mod engine;
 mod manage;
 mod model_catalog;
 mod reader;
+mod reader_wheel;
 mod source_options;
 mod storage;
 mod tracking;
@@ -27,6 +29,7 @@ fn main() -> iced::Result {
     iced::application(app::App::boot, app::App::update, app::App::view)
         .title("Suwa")
         .settings(iced::Settings {
+            id: Some("app.suwa.Suwa".into()),
             default_text_size: iced::Pixels(15.0),
             ..Default::default()
         })
@@ -37,6 +40,10 @@ fn main() -> iced::Result {
         .subscription(app::App::subscription)
         .window_size((1180.0, 820.0))
         .window(iced::window::Settings {
+            platform_specific: iced::window::settings::PlatformSpecific {
+                application_id: "app.suwa.Suwa".into(),
+                ..Default::default()
+            },
             min_size: Some(iced::Size::new(820.0, 600.0)),
             size: iced::Size::new(1180.0, 820.0),
             ..Default::default()

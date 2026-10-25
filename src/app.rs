@@ -7,7 +7,7 @@ use crate::{
     storage::Store,
 };
 use iced::widget::{self, scrollable};
-use iced::{Element, Subscription, Task, Theme, keyboard, window};
+use iced::{Element, Point, Subscription, Task, Theme, keyboard, window};
 use serde_json::json;
 use std::{
     collections::{HashMap, HashSet},
@@ -16,6 +16,13 @@ use std::{
 };
 
 type Outcome<T> = Result<T, String>;
+fn autoscroll_step(distance: f32) -> f32 {
+    if !distance.is_finite() {
+        return 0.0;
+    }
+    let pull = (distance.abs() - 16.0).max(0.0);
+    (pull / 15.0 + pull * pull / 300.0).min(80.0) * distance.signum()
+}
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SettingsPage {
     #[default]
@@ -40,6 +47,19 @@ pub enum Screen {
     Settings,
     Connection,
 }
+#[derive(Clone)]
+struct Location {
+    screen: Screen,
+    manga: Option<Manga>,
+    chapter: Option<i64>,
+    settings_page: SettingsPage,
+    manage_panel: crate::manage::Panel,
+    search: String,
+    shelf: Option<i64>,
+    grid_page: usize,
+    grid_scroll: (f32, f32),
+    source_options_source: String,
+}
 #[derive(Debug, Clone)]
 pub enum Message {
     SourceOptions(crate::source_options::Msg),
@@ -51,6 +71,7 @@ pub enum Message {
     Tracked(u64, crate::tracking::Msg),
     Managed(u64, crate::manage::Msg),
     Key(keyboard::Key),
+    Navigate(i32),
     Go(Screen),
     OpenSettings(SettingsPage),
     ToggleLibraryFilters,
@@ -59,6 +80,8 @@ pub enum Message {
     ToggleChapterTools,
     ChapterMenu(Option<i64>),
     ToggleReaderOptions,
+    ReaderPointer(Option<Point>),
+    ChromeFrame,
     DismissStatus,
     SelectModel(String),
     PreviewModel(&'static crate::model_catalog::Preset),
@@ -87,6 +110,7 @@ pub enum Message {
     Shelf(Option<i64>),
     OnlyUnread(bool),
     OnlyBookmarked(bool),
+    ShowHiddenCategories(bool),
     LibrarySort(LibrarySort),
     LibraryStatus(LibraryStatus),
     ReverseSort(bool),
@@ -94,6 +118,8 @@ pub enum Message {
     ChapterUnread(bool),
     ChapterBookmarked(bool),
     ChapterReverse(bool),
+    ChapterDeduplicate(bool),
+    ChapterGroup(crate::chapter_list::Group),
     ChapterPage(i32),
     SelectChapter(i64, bool),
     SelectUnreadChapters,
@@ -101,6 +127,7 @@ pub enum Message {
     ServerDownloadSelected,
     MarkSelectedChapters(bool),
     NextGrid(i32),
+    GridScroll(f32, f32),
     Cover(u64, i64, Outcome<Decoded>),
     RetryCovers,
     Open(i64),
@@ -121,6 +148,12 @@ pub enum Message {
     Double(bool),
     Scroll(f32, f32),
     ScrollBy(f32),
+    ReaderWheel(iced::mouse::ScrollDelta),
+    SmoothScrollFrame,
+    ReaderAutoScrollToggle(Point),
+    ReaderAutoScrollMove(Point),
+    ReaderAutoScrollCancel,
+    ReaderAutoScrollFrame,
     Resize(f32, f32),
     ToggleChrome,
     Fullscreen,
@@ -155,6 +188,7 @@ pub enum Message {
     SaveCategory(i64),
     DefaultCategory(i64, bool),
     HideCategory(i64, bool),
+    CategoryInAllTitles(i64, bool),
     MoveCategory(i64, i32),
     DeleteCategory(Option<i64>),
     ConfirmDeleteCategory,
@@ -192,6 +226,8 @@ pub struct App {
     pub sources: Vec<Source>,
     pub categories: Vec<Category>,
     pub hidden_categories: HashSet<i64>,
+    pub all_titles_excluded: HashSet<i64>,
+    pub show_hidden_categories: bool,
     pub selected: Option<Manga>,
     pub chapters: Vec<Chapter>,
     pub pending_read: Option<i64>,
@@ -208,9 +244,15 @@ pub struct App {
     pub chapter_unread: bool,
     pub chapter_bookmarked: bool,
     pub chapter_reverse: bool,
+    pub chapter_options: crate::chapter_list::Options,
     pub chapter_page: usize,
     pub chapter_selection: HashSet<i64>,
     pub grid_page: usize,
+    pub grid_scroll: (f32, f32),
+    history_back: Vec<Location>,
+    history_forward: Vec<Location>,
+    restoring_history: bool,
+    restore_reader: bool,
     pub sync_busy: bool,
     pub conflicts: Vec<Chapter>,
     pub source: Option<String>,
@@ -221,6 +263,9 @@ pub struct App {
     pub category_delete: Option<i64>,
     pub incognito: bool,
     pub chrome: bool,
+    pub top_chrome: f32,
+    pub bottom_chrome: f32,
+    reader_cursor: Option<Point>,
     pub fullscreen: bool,
     pub library_filters: bool,
     pub series_details: bool,
@@ -232,6 +277,9 @@ pub struct App {
     pub model_choice: &'static crate::model_catalog::Preset,
     pub model_install: Option<(String, Arc<crate::model_catalog::Progress>)>,
     pub model_status: String,
+    smooth_scroll: Option<f32>,
+    pub reader_autoscroll_anchor: Option<Point>,
+    reader_autoscroll_cursor: Point,
     pub size: (f32, f32),
     capture_path: Option<std::path::PathBuf>,
 }
@@ -300,6 +348,15 @@ impl App {
                     .flatten()
             })
             .unwrap_or_default();
+        let all_titles_excluded = engine
+            .as_ref()
+            .and_then(|e| {
+                store
+                    .get(&e.server.scope, "all_titles_excluded")
+                    .ok()
+                    .flatten()
+            })
+            .unwrap_or_default();
         let screen = if library.is_empty() {
             Screen::Connection
         } else {
@@ -330,6 +387,8 @@ impl App {
             sources: Vec::new(),
             categories,
             hidden_categories,
+            all_titles_excluded,
+            show_hidden_categories: false,
             selected: None,
             chapters: Vec::new(),
             pending_read: None,
@@ -346,9 +405,15 @@ impl App {
             chapter_unread: false,
             chapter_bookmarked: false,
             chapter_reverse: false,
+            chapter_options: Default::default(),
             chapter_page: 0,
             chapter_selection: HashSet::new(),
             grid_page: 0,
+            grid_scroll: (0.0, 800.0),
+            history_back: Vec::new(),
+            history_forward: Vec::new(),
+            restoring_history: false,
+            restore_reader: false,
             sync_busy: false,
             conflicts: Vec::new(),
             source: None,
@@ -359,6 +424,9 @@ impl App {
             category_delete: None,
             incognito: false,
             chrome: true,
+            top_chrome: 1.0,
+            bottom_chrome: 1.0,
+            reader_cursor: None,
             fullscreen: false,
             library_filters: false,
             series_details: false,
@@ -369,6 +437,9 @@ impl App {
             model_choice,
             model_install: None,
             model_status: String::new(),
+            smooth_scroll: None,
+            reader_autoscroll_anchor: None,
+            reader_autoscroll_cursor: Point::new(0.0, 0.0),
             custom_model: false,
             size: (1180.0, 820.0),
             capture_path: std::env::var_os("SUWA_CAPTURE").map(Into::into),
@@ -442,11 +513,76 @@ impl App {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| self.store.root.join("models"))
     }
+    fn chrome_targets(&self) -> (f32, f32) {
+        if self.chrome || self.reader_options {
+            return (1.0, 1.0);
+        }
+        let Some(cursor) = self.reader_cursor else {
+            return (0.0, 0.0);
+        };
+        let top = cursor.y <= 12.0
+            || (self.top_chrome > 0.05 && cursor.y <= crate::ui::READER_TOP_BAR_HEIGHT + 8.0);
+        let bottom_height = crate::ui::reader_bottom_bar_height(self.reader_options);
+        let bottom = cursor.y >= self.size.1 - 12.0
+            || (self.bottom_chrome > 0.05 && cursor.y >= self.size.1 - bottom_height - 8.0);
+        (if top { 1.0 } else { 0.0 }, if bottom { 1.0 } else { 0.0 })
+    }
     pub fn subscription(&self) -> Subscription<Message> {
+        let (top_target, bottom_target) = self.chrome_targets();
         Subscription::batch([
             iced::time::every(Duration::from_secs(3)).map(|_| Message::Tick),
             if self.model_install.is_some() {
                 iced::time::every(Duration::from_millis(200)).map(|_| Message::Noop)
+            } else {
+                Subscription::none()
+            },
+            if self.screen == Screen::Reader && self.smooth_scroll.is_some() {
+                iced::time::every(Duration::from_millis(16)).map(|_| Message::SmoothScrollFrame)
+            } else {
+                Subscription::none()
+            },
+            if self.screen == Screen::Reader && self.reader_autoscroll_anchor.is_some() {
+                iced::time::every(Duration::from_millis(16)).map(|_| Message::ReaderAutoScrollFrame)
+            } else {
+                Subscription::none()
+            },
+            if self.screen == Screen::Reader
+                && ((self.top_chrome - top_target).abs() > 0.01
+                    || (self.bottom_chrome - bottom_target).abs() > 0.01)
+            {
+                iced::time::every(Duration::from_millis(16)).map(|_| Message::ChromeFrame)
+            } else {
+                Subscription::none()
+            },
+            if self.screen == Screen::Reader {
+                iced::event::listen_with(|event, _, _| match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::ReaderPointer(Some(position)))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft) => {
+                        Some(Message::ReaderPointer(None))
+                    }
+                    _ => None,
+                })
+            } else {
+                Subscription::none()
+            },
+            if self.screen == Screen::Reader && self.reader_autoscroll_anchor.is_some() {
+                iced::event::listen_with(|event, status, _| match event {
+                    iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                        Some(Message::ReaderAutoScrollMove(position))
+                    }
+                    iced::Event::Mouse(iced::mouse::Event::CursorLeft)
+                    | iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Left | iced::mouse::Button::Right,
+                    )) => Some(Message::ReaderAutoScrollCancel),
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Middle,
+                    )) if status == iced::event::Status::Ignored => {
+                        Some(Message::ReaderAutoScrollCancel)
+                    }
+                    _ => None,
+                })
             } else {
                 Subscription::none()
             },
@@ -461,6 +597,12 @@ impl App {
                     iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. }) => {
                         Some(Message::Key(key))
                     }
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Back,
+                    )) => Some(Message::Navigate(-1)),
+                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+                        iced::mouse::Button::Forward,
+                    )) => Some(Message::Navigate(1)),
                     _ => None,
                 }
             }),
@@ -492,11 +634,20 @@ impl App {
             return Task::none();
         };
         let sid = self.session;
+        let cols = self.grid_columns();
+        let (first, count) = if self.screen == Screen::Library {
+            let first_row = (self.grid_scroll.0.max(0.0) / 293.0) as usize;
+            let visible_rows = (self.grid_scroll.1.max(1.0) / 293.0).ceil() as usize;
+            let start_row = first_row.saturating_sub(2);
+            (start_row * cols, (visible_rows + 5) * cols)
+        } else {
+            (self.grid_page * 24, 24)
+        };
         let items: Vec<_> = self
             .filtered()
             .into_iter()
-            .skip(self.grid_page * 24)
-            .take(24)
+            .skip(first)
+            .take(count)
             .filter_map(|m| m.thumbnail_url.as_ref().map(|url| (m.id, url.clone())))
             .collect();
         if self.covers.len() > 144 {
@@ -516,8 +667,119 @@ impl App {
         }
         Task::batch(jobs)
     }
+    pub fn grid_columns(&self) -> usize {
+        (((self.size.0 - 224.0) / 168.0) as usize).max(2)
+    }
+    fn reset_grid(&mut self) -> Task<Message> {
+        self.grid_page = 0;
+        self.grid_scroll.0 = 0.0;
+        Task::batch([
+            self.covers(),
+            widget::operation::scroll_to(
+                "library-grid",
+                scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+            ),
+        ])
+    }
+    fn location(&self) -> Location {
+        Location {
+            screen: self.screen,
+            manga: self.selected.clone(),
+            chapter: self
+                .reader
+                .as_ref()
+                .map(|r| r.chapter_id)
+                .or(self.pending_read),
+            settings_page: self.settings_page,
+            manage_panel: self.manager.panel,
+            search: self.search.clone(),
+            shelf: self.shelf,
+            grid_page: self.grid_page,
+            grid_scroll: self.grid_scroll,
+            source_options_source: self.source_options.source.clone(),
+        }
+    }
+    fn remember_location(&mut self) {
+        if !self.restoring_history {
+            self.history_back.push(self.location());
+            self.history_forward.clear();
+        }
+    }
+    fn navigate(&mut self, direction: i32) -> Task<Message> {
+        let target = if direction < 0 {
+            self.history_back.pop()
+        } else {
+            self.history_forward.pop()
+        };
+        let Some(target) = target else {
+            return Task::none();
+        };
+        let current = self.location();
+        if direction < 0 {
+            self.history_forward.push(current);
+        } else {
+            self.history_back.push(current);
+        }
+        self.restoring_history = true;
+        if let Some(manga) = &target.manga
+            && !self
+                .library
+                .iter()
+                .chain(self.browse.iter())
+                .any(|m| m.id == manga.id)
+        {
+            self.browse.push(manga.clone());
+        }
+        let task = match target.screen {
+            Screen::Series => target
+                .manga
+                .as_ref()
+                .map(|m| self.update(Message::Open(m.id)))
+                .unwrap_or_else(|| self.update(Message::Go(Screen::Library))),
+            Screen::Reader => {
+                self.pending_read = target.chapter;
+                self.restore_reader = true;
+                target
+                    .manga
+                    .as_ref()
+                    .map(|m| self.update(Message::Open(m.id)))
+                    .unwrap_or_else(|| self.update(Message::Go(Screen::Library)))
+            }
+            Screen::Manage => self.update(Message::Manage(crate::manage::Msg::Open(
+                target.manage_panel,
+            ))),
+            Screen::SourceOptions => self.update(Message::SourceOptions(
+                crate::source_options::Msg::Open(target.source_options_source.clone()),
+            )),
+            Screen::Tracking => self.update(Message::Tracking(crate::tracking::Msg::Open(None))),
+            Screen::Backups => self.update(Message::Backup(crate::backups::Msg::Open)),
+            screen => self.update(Message::Go(screen)),
+        };
+        self.restoring_history = false;
+        self.settings_page = target.settings_page;
+        if matches!(target.screen, Screen::Library | Screen::Browse) {
+            self.search = target.search;
+            self.shelf = target
+                .shelf
+                .filter(|id| self.show_hidden_categories || !self.hidden_categories.contains(id));
+            self.grid_page = target.grid_page;
+            self.grid_scroll = target.grid_scroll;
+            return Task::batch([
+                task,
+                self.covers(),
+                widget::operation::scroll_to(
+                    "library-grid",
+                    scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: target.grid_scroll.0,
+                    },
+                ),
+            ]);
+        }
+        task
+    }
     pub fn filtered(&self) -> Vec<&Manga> {
-        let search = self.search.to_lowercase();
+        let search = self.search.trim().to_lowercase();
         let default_category = self
             .categories
             .iter()
@@ -535,7 +797,12 @@ impl App {
                 && (self.screen == Screen::Browse || !self.only_bookmarked || m.bookmark_count > 0)
                 && (self.screen == Screen::Browse || self.library_status.matches(&m.status))
                 && (self.screen == Screen::Browse
+                    || self.show_hidden_categories
+                    || !search.is_empty()
                     || m.visible_in_library(&self.hidden_categories, default_category))
+                && (self.screen == Screen::Browse
+                    || self.shelf.is_some()
+                    || m.visible_in_library(&self.all_titles_excluded, default_category))
                 && (self.screen == Screen::Browse
                     || self
                         .shelf
@@ -578,11 +845,33 @@ impl App {
         }
         items
     }
+    pub fn reading_chapters(&self) -> Vec<&Chapter> {
+        crate::chapter_list::chapters(&self.chapters, &self.chapter_options)
+    }
+
+    fn save_chapter_options(&mut self, options: crate::chapter_list::Options) {
+        let (Some(engine), Some(manga)) = (&self.engine, &self.selected) else {
+            return;
+        };
+        if let Err(e) = self.store.put(
+            &engine.server.scope,
+            &format!("chapter_options:{}", manga.id),
+            &options,
+        ) {
+            self.error(format!("Could not save chapter options: {e}"));
+            return;
+        }
+        self.chapter_options = options;
+        self.chapter_page = 0;
+        self.chapter_selection.clear();
+        self.chapter_menu = None;
+    }
+
     pub fn filtered_chapters(&self) -> Vec<&Chapter> {
         let query = self.chapter_search.to_lowercase();
         let mut chapters: Vec<_> = self
-            .chapters
-            .iter()
+            .reading_chapters()
+            .into_iter()
             .filter(|c| {
                 (!self.chapter_unread || !c.is_read)
                     && (!self.chapter_bookmarked || c.is_bookmarked)
@@ -611,6 +900,21 @@ impl App {
             },
         )
     }
+    fn apply_reader_scroll(&mut self, y: f32, height: f32) -> Task<Message> {
+        if let Some(r) = self.reader.as_mut() {
+            let was_finished = r.finished();
+            r.scroll = y;
+            r.viewport = height;
+            let current = r.locate(y + height * 0.3);
+            let changed = current != r.current || was_finished != r.finished();
+            self.set_reader_page(current);
+            if changed {
+                self.record_position();
+            }
+            return Task::batch([self.load_pages(), self.enhance_next()]);
+        }
+        Task::none()
+    }
     fn load_pages(&mut self) -> Task<Message> {
         let Some(e) = self.engine.clone() else {
             return Task::none();
@@ -621,7 +925,10 @@ impl App {
         let generation = self.generation;
         let wanted = if r.mode.strip() {
             let v = r.visible();
-            v.start.saturating_sub(1)..(v.end + self.settings.prefetch).min(r.urls.len())
+            v.start.saturating_sub(1)
+                ..v.end
+                    .saturating_add(self.settings.prefetch)
+                    .min(r.urls.len())
         } else {
             r.wanted(self.settings.prefetch)
         };
@@ -642,10 +949,9 @@ impl App {
             && r.append_loading.is_none()
             && r.append_error.is_none()
             && let Some(last) = r.spans.last()
-            && let Some(position) = self.chapters.iter().position(|c| c.id == last.id)
-            && let Some(next) = self.chapters.get(position + 1)
+            && let Some(id) =
+                crate::chapter_list::adjacent(&self.chapters, &self.chapter_options, last.id, 1)
         {
-            let id = next.id;
             r.append_loading = Some(id);
             jobs.push(Task::perform(
                 async move { e.pages(id).await.map_err(|e| e.to_string()) },
@@ -664,8 +970,17 @@ impl App {
         if !r.enhancing.is_empty() {
             return Task::none();
         }
-        let wanted = if r.mode.strip() {
+        let visible = if r.mode.strip() {
             r.visible()
+        } else {
+            r.current..(r.current + usize::from(self.settings.double_page) + 1).min(r.urls.len())
+        };
+        let wanted = if r.mode.strip() {
+            visible.start.saturating_sub(1)
+                ..visible
+                    .end
+                    .saturating_add(self.settings.prefetch)
+                    .min(r.urls.len())
         } else {
             r.wanted(self.settings.prefetch)
         };
@@ -675,7 +990,7 @@ impl App {
             .filter(|(index, image)| {
                 wanted.contains(index) && !image.enhanced && image.original.is_some()
             })
-            .min_by_key(|(index, _)| index.abs_diff(r.current))
+            .min_by_key(|(index, _)| (!visible.contains(index), index.abs_diff(r.current)))
             .map(|(index, image)| (*index, image.original.as_ref().unwrap().clone()));
         let Some((index, original)) = candidate else {
             return Task::none();
@@ -790,7 +1105,37 @@ impl App {
         )
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
+        let changing_screen = match &message {
+            Message::Go(screen) => *screen != self.screen && *screen != Screen::Downloads,
+            Message::OpenSettings(page) => {
+                self.screen == Screen::Settings && self.settings_page != *page
+            }
+            Message::Open(id) => {
+                self.screen != Screen::Series || self.selected.as_ref().map(|m| m.id) != Some(*id)
+            }
+            Message::Read(_) => self.screen != Screen::Reader,
+            Message::Manage(crate::manage::Msg::Open(panel)) => {
+                !matches!(
+                    panel,
+                    crate::manage::Panel::Backups | crate::manage::Panel::Trackers
+                ) && (self.screen != Screen::Manage || self.manager.panel != *panel)
+            }
+            Message::SourceOptions(crate::source_options::Msg::Open(_)) => {
+                self.screen != Screen::SourceOptions
+            }
+            Message::SourceOptions(
+                crate::source_options::Msg::Back | crate::source_options::Msg::Apply,
+            ) => self.screen == Screen::SourceOptions,
+            Message::Tracking(crate::tracking::Msg::Open(_)) => self.screen != Screen::Tracking,
+            Message::Backup(crate::backups::Msg::Open) => self.screen != Screen::Backups,
+            _ => false,
+        };
+        if changing_screen {
+            self.reader_autoscroll_anchor = None;
+            self.remember_location();
+        }
         match message {
+            Message::Navigate(direction) => return self.navigate(direction),
             Message::OpenSettings(page) => {
                 self.settings_page = page;
                 return self.update(Message::Go(Screen::Settings));
@@ -800,11 +1145,17 @@ impl App {
                 self.only_unread = false;
                 self.only_bookmarked = false;
                 self.library_status = LibraryStatus::All;
+                self.show_hidden_categories = false;
+                if self
+                    .shelf
+                    .is_some_and(|id| self.hidden_categories.contains(&id))
+                {
+                    self.shelf = None;
+                }
                 self.settings.library_sort = LibrarySort::Title;
                 self.settings.reverse_sort = false;
-                self.grid_page = 0;
                 self.save();
-                return self.covers();
+                return self.reset_grid();
             }
             Message::ToggleSeriesDetails => self.series_details = !self.series_details,
             Message::ToggleChapterTools => {
@@ -817,10 +1168,17 @@ impl App {
             Message::ChapterMenu(id) => self.chapter_menu = id,
             Message::ToggleReaderOptions => {
                 self.reader_options = !self.reader_options;
-                if let Some(reader) = &mut self.reader {
-                    reader.viewport = (self.size.1
-                        - crate::ui::reader_chrome_height(self.reader_options))
-                    .max(1.0);
+            }
+            Message::ReaderPointer(position) => self.reader_cursor = position,
+            Message::ChromeFrame => {
+                let (top, bottom) = self.chrome_targets();
+                self.top_chrome += (top - self.top_chrome) * 0.3;
+                self.bottom_chrome += (bottom - self.bottom_chrome) * 0.3;
+                if (top - self.top_chrome).abs() < 0.02 {
+                    self.top_chrome = top;
+                }
+                if (bottom - self.bottom_chrome).abs() < 0.02 {
+                    self.bottom_chrome = bottom;
                 }
             }
             Message::DismissStatus => self.status.clear(),
@@ -1024,6 +1382,23 @@ impl App {
             }
 
             Message::Key(key) => {
+                if self.reader_autoscroll_anchor.is_some()
+                    && key == keyboard::Key::Named(keyboard::key::Named::Escape)
+                {
+                    self.reader_autoscroll_anchor = None;
+                    return Task::none();
+                }
+                match key.as_ref() {
+                    keyboard::Key::Named(
+                        keyboard::key::Named::BrowserBack | keyboard::key::Named::GoBack,
+                    ) => {
+                        return self.navigate(-1);
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::BrowserForward) => {
+                        return self.navigate(1);
+                    }
+                    _ => {}
+                }
                 if key == keyboard::Key::Named(keyboard::key::Named::F11) {
                     return self.update(Message::Fullscreen);
                 }
@@ -1073,6 +1448,12 @@ impl App {
                 return self.update(action);
             }
             Message::Go(screen) => {
+                self.smooth_scroll = None;
+                self.reader_autoscroll_anchor = None;
+                self.reader_cursor = None;
+                if !self.restoring_history {
+                    self.restore_reader = false;
+                }
                 if self.screen == Screen::Connection && screen == Screen::Library {
                     self.login_revision += 1;
                     self.credential_status.clear();
@@ -1088,6 +1469,9 @@ impl App {
                 self.screen = screen;
                 self.search.clear();
                 self.grid_page = 0;
+                if !self.restoring_history {
+                    self.grid_scroll.0 = 0.0;
+                }
                 self.busy = false;
                 if screen == Screen::Browse
                     && let Some(e) = self.engine.clone()
@@ -1099,7 +1483,10 @@ impl App {
                     );
                 }
                 if screen == Screen::Library {
-                    return self.covers();
+                    if self.restoring_history {
+                        return Task::none();
+                    }
+                    return self.reset_grid();
                 }
             }
             Message::ServerText(v) => {
@@ -1214,6 +1601,8 @@ impl App {
                     self.session += 1;
                     self.browse_request += 1;
                     self.browse.clear();
+                    self.history_back.clear();
+                    self.history_forward.clear();
                     self.sources.clear();
                     self.selected = None;
                     self.source = None;
@@ -1224,6 +1613,7 @@ impl App {
                     self.tracking = Default::default();
                     self.backups = Default::default();
                     self.shelf = None;
+                    self.show_hidden_categories = false;
                     self.category_name.clear();
                     self.category_delete = None;
                     self.search.clear();
@@ -1234,6 +1624,7 @@ impl App {
                     self.cover_errors.clear();
                     self.pending_read = None;
                     self.chapters.clear();
+                    self.chapter_options = Default::default();
                     self.reader = None;
 
                     self.sync_busy = false;
@@ -1253,6 +1644,12 @@ impl App {
                     self.hidden_categories = self
                         .store
                         .get(&server.scope, "hidden_categories")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    self.all_titles_excluded = self
+                        .store
+                        .get(&server.scope, "all_titles_excluded")
                         .ok()
                         .flatten()
                         .unwrap_or_default();
@@ -1352,42 +1749,48 @@ impl App {
             },
             Message::Search(s) => {
                 self.search = s;
-                self.grid_page = 0;
                 if self.screen == Screen::Library {
-                    return self.covers();
+                    return self.reset_grid();
                 }
             }
             Message::Shelf(id) => {
-                self.shelf = id.filter(|id| !self.hidden_categories.contains(id));
-                self.grid_page = 0;
-                return self.covers();
+                self.shelf = id.filter(|id| {
+                    self.show_hidden_categories || !self.hidden_categories.contains(id)
+                });
+                return self.reset_grid();
+            }
+            Message::ShowHiddenCategories(show) => {
+                self.show_hidden_categories = show;
+                if !show
+                    && self
+                        .shelf
+                        .is_some_and(|id| self.hidden_categories.contains(&id))
+                {
+                    self.shelf = None;
+                }
+                return self.reset_grid();
             }
             Message::OnlyUnread(v) => {
                 self.only_unread = v;
-                self.grid_page = 0;
-                return self.covers();
+                return self.reset_grid();
             }
             Message::OnlyBookmarked(v) => {
                 self.only_bookmarked = v;
-                self.grid_page = 0;
-                return self.covers();
+                return self.reset_grid();
             }
             Message::LibrarySort(v) => {
                 self.settings.library_sort = v;
-                self.grid_page = 0;
                 self.save();
-                return self.covers();
+                return self.reset_grid();
             }
             Message::LibraryStatus(v) => {
                 self.library_status = v;
-                self.grid_page = 0;
-                return self.covers();
+                return self.reset_grid();
             }
             Message::ReverseSort(v) => {
                 self.settings.reverse_sort = v;
-                self.grid_page = 0;
                 self.save();
-                return self.covers();
+                return self.reset_grid();
             }
             Message::ChapterSearch(v) => {
                 self.chapter_search = v;
@@ -1405,6 +1808,19 @@ impl App {
                 self.chapter_reverse = v;
                 self.chapter_page = 0;
             }
+            Message::ChapterDeduplicate(v) => {
+                let mut options = self.chapter_options.clone();
+                options.deduplicate = v;
+                self.save_chapter_options(options);
+            }
+            Message::ChapterGroup(group) => {
+                let mut options = self.chapter_options.clone();
+                options.preferred_group = match group {
+                    crate::chapter_list::Group::Automatic => None,
+                    crate::chapter_list::Group::Named(name) => Some(name),
+                };
+                self.save_chapter_options(options);
+            }
             Message::ChapterPage(delta) => {
                 self.chapter_page = self.chapter_page.saturating_add_signed(delta as isize)
             }
@@ -1417,8 +1833,8 @@ impl App {
             }
             Message::SelectUnreadChapters => {
                 self.chapter_selection = self
-                    .chapters
-                    .iter()
+                    .filtered_chapters()
+                    .into_iter()
                     .filter(|c| !c.is_read)
                     .map(|c| c.id)
                     .collect()
@@ -1482,6 +1898,16 @@ impl App {
                 self.grid_page = self.grid_page.saturating_add_signed(delta as isize);
                 return self.covers();
             }
+            Message::GridScroll(y, height) => {
+                if self.screen == Screen::Library {
+                    let old_row = (self.grid_scroll.0 / 293.0) as usize;
+                    let new_row = (y.max(0.0) / 293.0) as usize;
+                    self.grid_scroll = (y, height);
+                    if old_row != new_row {
+                        return self.covers();
+                    }
+                }
+            }
             Message::Cover(sid, id, result) if sid == self.session => {
                 self.cover_loading.remove(&id);
                 match result {
@@ -1496,6 +1922,10 @@ impl App {
             }
             Message::RetryCovers => return self.covers(),
             Message::Open(id) => {
+                if self.screen == Screen::Reader {
+                    self.record_position();
+                    self.smooth_scroll = None;
+                }
                 if self.selected.as_ref().map(|m| m.id) != Some(id) {
                     self.series_details = false;
                     self.chapter_tools = false;
@@ -1516,6 +1946,16 @@ impl App {
                 }
                 self.reader = None;
                 self.chapters.clear();
+                self.chapter_options = self
+                    .engine
+                    .as_ref()
+                    .and_then(|e| {
+                        self.store
+                            .get(&e.server.scope, &format!("chapter_options:{id}"))
+                            .ok()
+                            .flatten()
+                    })
+                    .unwrap_or_default();
                 self.busy = true;
                 if let Some(e) = self.engine.clone() {
                     let sid = self.session;
@@ -1533,18 +1973,27 @@ impl App {
                     Ok(c) => {
                         self.chapters = c;
                         if let Some(chapter) = self.pending_read.take() {
-                            return self.update(Message::Read(chapter));
+                            self.restoring_history = self.restore_reader;
+                            let task = self.update(Message::Read(chapter));
+                            self.restoring_history = false;
+                            self.restore_reader = false;
+                            return task;
                         }
                     }
                     Err(e) => self.error(e),
                 }
             }
             Message::Read(id) => {
+                self.smooth_scroll = None;
+                self.reader_autoscroll_anchor = None;
+                self.reader_cursor = None;
                 self.record_position();
                 self.screen = Screen::Reader;
                 self.reader = None;
                 self.busy = true;
                 self.chrome = true;
+                self.top_chrome = 1.0;
+                self.bottom_chrome = 1.0;
                 self.reader_options = self.capture_path.is_some()
                     && std::env::var("SUWA_CAPTURE_VIEW").as_deref() == Ok("reader-options");
                 if let Some(e) = self.engine.clone() {
@@ -1591,9 +2040,7 @@ impl App {
                             self.settings.fit,
                         );
                         reader.width = self.settings.strip_width.min(self.size.0 - 40.0);
-                        reader.viewport = (self.size.1
-                            - crate::ui::reader_chrome_height(self.reader_options))
-                        .max(1.0);
+                        reader.viewport = self.size.1.max(1.0);
                         let offset = reader.offset(reader.current);
                         reader.scroll = offset;
                         self.reader = Some(reader);
@@ -1713,12 +2160,13 @@ impl App {
                             r.scroll = r.offset(r.urls.len());
                             self.record_position();
                         }
-                        if let Some(pos) = self.chapters.iter().position(|c| c.id == chapter) {
-                            let target = pos as i64 + delta as i64;
-                            if target >= 0 && (target as usize) < self.chapters.len() {
-                                return self
-                                    .update(Message::Read(self.chapters[target as usize].id));
-                            }
+                        if let Some(id) = crate::chapter_list::adjacent(
+                            &self.chapters,
+                            &self.chapter_options,
+                            chapter,
+                            delta,
+                        ) {
+                            return self.update(Message::Read(id));
                         }
                     } else {
                         return self.update(Message::Jump(next as f32));
@@ -1726,6 +2174,8 @@ impl App {
                 }
             }
             Message::Jump(value) => {
+                self.smooth_scroll = None;
+                self.reader_autoscroll_anchor = None;
                 let Some(r) = self.reader.as_mut() else {
                     return Task::none();
                 };
@@ -1744,6 +2194,8 @@ impl App {
                 ]);
             }
             Message::Mode(mode) => {
+                self.smooth_scroll = None;
+                self.reader_autoscroll_anchor = None;
                 self.settings.mode = mode;
                 if let Some(r) = self.reader.as_mut() {
                     r.mode = mode;
@@ -1773,54 +2225,115 @@ impl App {
                 self.save();
             }
             Message::ScrollBy(delta) => {
-                if let Some(r) = self.reader.as_ref() {
-                    let y = (r.scroll + delta)
-                        .clamp(0.0, (r.offset(r.urls.len()) - r.viewport).max(0.0));
-                    let height = r.viewport;
-                    let loading = self.update(Message::Scroll(y, height));
-                    return Task::batch([loading, self.scroll_reader()]);
+                self.reader_autoscroll_anchor = None;
+                let Some(r) = self.reader.as_ref() else {
+                    return Task::none();
+                };
+                if !r.mode.strip() || !delta.is_finite() {
+                    return Task::none();
+                }
+                let end = (r.offset(r.urls.len()) - r.viewport).max(0.0);
+                let target = self.smooth_scroll.unwrap_or(r.scroll) + delta;
+                let distance = r.viewport.max(1.0) * 1.25;
+                self.smooth_scroll = Some(
+                    target
+                        .clamp(r.scroll - distance, r.scroll + distance)
+                        .clamp(0.0, end),
+                );
+                return self.update(Message::SmoothScrollFrame);
+            }
+            Message::ReaderWheel(delta) => {
+                let distance = match delta {
+                    iced::mouse::ScrollDelta::Lines { y, .. } => -y * 180.0,
+                    iced::mouse::ScrollDelta::Pixels { y, .. } => -y * 1.15,
+                };
+                return self.update(Message::ScrollBy(distance));
+            }
+            Message::ReaderAutoScrollToggle(position) => {
+                if self.reader_autoscroll_anchor.is_some() {
+                    self.reader_autoscroll_anchor = None;
+                } else if self.reader.as_ref().is_some_and(|r| r.mode.strip()) {
+                    self.smooth_scroll = None;
+                    self.reader_autoscroll_anchor = Some(position);
+                    self.reader_autoscroll_cursor = position;
                 }
             }
-            Message::Scroll(y, height) => {
-                if let Some(r) = self.reader.as_mut() {
-                    let was_finished = r.finished();
-                    r.scroll = y;
-                    r.viewport = height;
-                    let current = r.locate(y + height * 0.3);
-                    let changed = current != r.current || was_finished != r.finished();
-                    self.set_reader_page(current);
-                    if changed {
-                        self.record_position();
-                    }
-                    return Task::batch([self.load_pages(), self.enhance_next()]);
+            Message::ReaderAutoScrollMove(position) => {
+                if self.reader_autoscroll_anchor.is_some() {
+                    self.reader_autoscroll_cursor = position;
                 }
+            }
+            Message::ReaderAutoScrollCancel => self.reader_autoscroll_anchor = None,
+            Message::ReaderAutoScrollFrame => {
+                let Some(anchor) = self.reader_autoscroll_anchor else {
+                    return Task::none();
+                };
+                let Some(r) = self.reader.as_ref() else {
+                    self.reader_autoscroll_anchor = None;
+                    return Task::none();
+                };
+                if !r.mode.strip() {
+                    self.reader_autoscroll_anchor = None;
+                    return Task::none();
+                }
+                let step = autoscroll_step(self.reader_autoscroll_cursor.y - anchor.y);
+                let end = (r.offset(r.urls.len()) - r.viewport).max(0.0);
+                let next = (r.scroll + step).clamp(0.0, end);
+                if (next - r.scroll).abs() < 0.01 {
+                    return Task::none();
+                }
+                let height = r.viewport;
+                let loading = self.apply_reader_scroll(next, height);
+                return Task::batch([loading, self.scroll_reader()]);
+            }
+            Message::SmoothScrollFrame => {
+                let (Some(target), Some(r)) = (self.smooth_scroll, self.reader.as_ref()) else {
+                    return Task::none();
+                };
+                if !r.mode.strip() {
+                    self.smooth_scroll = None;
+                    return Task::none();
+                }
+                let next = if (target - r.scroll).abs() < 1.0 {
+                    self.smooth_scroll = None;
+                    target
+                } else {
+                    r.scroll + (target - r.scroll) * 0.38
+                };
+                let height = r.viewport;
+                let loading = self.apply_reader_scroll(next, height);
+                return Task::batch([loading, self.scroll_reader()]);
+            }
+            Message::Scroll(y, height) => {
+                if self.smooth_scroll.is_some()
+                    && self
+                        .reader
+                        .as_ref()
+                        .is_some_and(|r| (y - r.scroll).abs() > 1.0)
+                {
+                    self.smooth_scroll = None;
+                }
+                return self.apply_reader_scroll(y, height);
             }
             Message::Resize(w, h) => {
                 self.size = (w, h);
+                if self.screen == Screen::Library {
+                    return self.covers();
+                }
                 if let Some(r) = self.reader.as_mut() {
                     let anchor = r.locate(r.scroll);
                     let fraction = (r.scroll - r.offset(anchor)) / r.page_height(anchor);
                     r.width = self.settings.strip_width.min((w - 40.0).max(1.0));
-                    r.viewport = (h - if self.chrome {
-                        crate::ui::reader_chrome_height(self.reader_options)
-                    } else {
-                        20.0
-                    })
-                    .max(1.0);
+                    r.viewport = h.max(1.0);
                     r.scroll = r.offset(anchor) + fraction * r.page_height(anchor);
                 }
                 return Task::batch([self.load_pages(), self.scroll_reader()]);
             }
             Message::ToggleChrome => {
                 self.chrome = !self.chrome;
-                if let Some(reader) = &mut self.reader {
-                    reader.viewport = (self.size.1
-                        - if self.chrome {
-                            crate::ui::reader_chrome_height(self.reader_options)
-                        } else {
-                            20.0
-                        })
-                    .max(1.0);
+                if !self.chrome {
+                    self.reader_options = false;
+                    self.reader_cursor = None;
                 }
             }
             Message::Fullscreen => {
@@ -2144,10 +2657,30 @@ impl App {
                         return Task::none();
                     }
                     self.hidden_categories = ids;
-                    if self.shelf == Some(id) {
+                    if hidden && !self.show_hidden_categories && self.shelf == Some(id) {
                         self.shelf = None;
                     }
                     self.grid_page = 0;
+                }
+            }
+            Message::CategoryInAllTitles(id, included) => {
+                if let Some(engine) = &self.engine {
+                    let mut ids = self.all_titles_excluded.clone();
+                    if included {
+                        ids.remove(&id);
+                    } else {
+                        ids.insert(id);
+                    }
+                    if let Err(e) =
+                        self.store
+                            .put(&engine.server.scope, "all_titles_excluded", &ids)
+                    {
+                        self.error(format!("Could not save All titles categories: {e}"));
+                        return Task::none();
+                    }
+                    self.all_titles_excluded = ids;
+                    self.grid_page = 0;
+                    self.grid_scroll = (0.0, 0.0);
                 }
             }
             Message::CategoryName(v) => self.category_name = v,
@@ -2241,6 +2774,228 @@ impl App {
 mod tests {
     use super::*;
 
+    #[test]
+    fn hidden_reader_bars_follow_edges_without_resizing_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.screen = Screen::Reader;
+        let mut reader = Reader::new(1, vec!["page".into()], 0, ReadingMode::Webtoon, Fit::Width);
+        reader.viewport = 820.0;
+        app.reader = Some(reader);
+        let _ = app.update(Message::ToggleChrome);
+        for _ in 0..15 {
+            let _ = app.update(Message::ChromeFrame);
+        }
+        assert_eq!((app.top_chrome, app.bottom_chrome), (0.0, 0.0));
+
+        let _ = app.update(Message::ReaderPointer(Some(Point::new(300.0, 5.0))));
+        let _ = app.update(Message::ChromeFrame);
+        assert!(app.top_chrome > 0.0);
+        assert_eq!(app.bottom_chrome, 0.0);
+
+        let _ = app.update(Message::ReaderPointer(Some(Point::new(300.0, 815.0))));
+        let _ = app.update(Message::ChromeFrame);
+        assert!(app.bottom_chrome > 0.0);
+
+        let _ = app.update(Message::ToggleReaderOptions);
+        assert_eq!(app.reader.as_ref().unwrap().viewport, 820.0);
+        assert_eq!(app.chrome_targets(), (1.0, 1.0));
+
+        app.chrome = true;
+        let _ = app.update(Message::ToggleChrome);
+        assert!(!app.reader_options);
+        assert_eq!(app.chrome_targets(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn middle_click_autoscroll_uses_distance_and_stops() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.screen = Screen::Reader;
+        let mut reader = Reader::new(
+            1,
+            vec!["page".into(); 8],
+            0,
+            ReadingMode::Webtoon,
+            Fit::Width,
+        );
+        reader.viewport = 450.0;
+        app.reader = Some(reader);
+
+        let anchor = Point::new(100.0, 100.0);
+        let _ = app.update(Message::ReaderAutoScrollToggle(anchor));
+        let _ = app.update(Message::ReaderAutoScrollMove(Point::new(100.0, 110.0)));
+        let _ = app.update(Message::ReaderAutoScrollFrame);
+        assert_eq!(app.reader.as_ref().unwrap().scroll, 0.0);
+
+        let _ = app.update(Message::ReaderAutoScrollMove(Point::new(100.0, 150.0)));
+        let _ = app.update(Message::ReaderAutoScrollFrame);
+        let slow = app.reader.as_ref().unwrap().scroll;
+        assert!(slow > 0.0);
+
+        let _ = app.update(Message::ReaderAutoScrollMove(Point::new(100.0, 250.0)));
+        let _ = app.update(Message::ReaderAutoScrollFrame);
+        let fast = app.reader.as_ref().unwrap().scroll - slow;
+        assert!(fast > slow);
+        assert_eq!(autoscroll_step(-150.0), -autoscroll_step(150.0));
+
+        let _ = app.update(Message::ReaderAutoScrollToggle(anchor));
+        assert!(app.reader_autoscroll_anchor.is_none());
+        let stopped = app.reader.as_ref().unwrap().scroll;
+        let _ = app.update(Message::ReaderAutoScrollFrame);
+        assert_eq!(app.reader.as_ref().unwrap().scroll, stopped);
+    }
+
+    #[test]
+    fn back_and_forward_restore_library_position_and_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.screen = Screen::Library;
+        app.library.push(Manga {
+            id: 7,
+            title: "Series".into(),
+            in_library: true,
+            ..Manga::default()
+        });
+        app.grid_scroll = (590.0, 700.0);
+        let _ = app.update(Message::Open(7));
+        assert_eq!(app.screen, Screen::Series);
+        let _ = app.update(Message::Key(keyboard::Key::Named(
+            keyboard::key::Named::BrowserBack,
+        )));
+        assert_eq!(app.screen, Screen::Library);
+        assert_eq!(app.grid_scroll.0, 590.0);
+        let _ = app.update(Message::Key(keyboard::Key::Named(
+            keyboard::key::Named::BrowserForward,
+        )));
+        assert_eq!(app.screen, Screen::Series);
+        assert_eq!(app.selected.as_ref().map(|m| m.id), Some(7));
+    }
+
+    #[test]
+    fn wide_library_has_more_than_ten_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.size.0 = 2400.0;
+        assert!(app.grid_columns() > 10);
+    }
+
+    #[test]
+    fn restoring_reader_does_not_add_another_history_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.screen = Screen::Library;
+        app.library.push(Manga {
+            id: 7,
+            title: "Series".into(),
+            in_library: true,
+            ..Manga::default()
+        });
+        let _ = app.update(Message::Open(7));
+        let _ = app.update(Message::Read(11));
+        app.reader = Some(Reader::new(
+            11,
+            vec!["page".into()],
+            0,
+            ReadingMode::Webtoon,
+            Fit::Width,
+        ));
+        let _ = app.update(Message::Go(Screen::Series));
+        let _ = app.update(Message::Navigate(-1));
+        let back_count = app.history_back.len();
+        let _ = app.update(Message::Chapters(
+            app.session,
+            7,
+            Ok(vec![Chapter {
+                id: 11,
+                manga_id: 7,
+                ..Chapter::default()
+            }]),
+        ));
+        assert_eq!(app.screen, Screen::Reader);
+        assert_eq!(app.history_back.len(), back_count);
+        assert_eq!(app.history_forward.len(), 1);
+    }
+
+    #[test]
+    fn wheel_scroll_has_more_range_and_settles_without_a_jump() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.screen = Screen::Reader;
+        let mut reader = Reader::new(
+            1,
+            vec!["page".into(); 8],
+            0,
+            ReadingMode::Webtoon,
+            Fit::Width,
+        );
+        reader.viewport = 450.0;
+        app.reader = Some(reader);
+
+        let _ = app.update(Message::ReaderWheel(iced::mouse::ScrollDelta::Lines {
+            x: 0.0,
+            y: -1.0,
+        }));
+        let first = app.reader.as_ref().unwrap().scroll;
+        assert!(first > 0.0 && first < 180.0);
+        assert_eq!(app.smooth_scroll, Some(180.0));
+        let _ = app.update(Message::ReaderWheel(iced::mouse::ScrollDelta::Lines {
+            x: 0.0,
+            y: -1.0,
+        }));
+        assert_eq!(app.smooth_scroll, Some(360.0));
+        for _ in 0..15 {
+            let _ = app.update(Message::SmoothScrollFrame);
+        }
+        assert!((app.reader.as_ref().unwrap().scroll - 360.0).abs() < 1.0);
+        assert!(app.smooth_scroll.is_none());
+
+        let _ = app.update(Message::ReaderWheel(iced::mouse::ScrollDelta::Pixels {
+            x: 0.0,
+            y: -10.0,
+        }));
+        assert_eq!(app.smooth_scroll, Some(371.5));
+        let _ = app.update(Message::Scroll(42.0, 450.0));
+        assert!(app.smooth_scroll.is_none());
+        assert_eq!(app.reader.as_ref().unwrap().scroll, 42.0);
+    }
+
+    #[test]
+    fn continuous_reader_enhances_the_next_prefetched_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.settings.upscale = true;
+        app.screen = Screen::Reader;
+        let mut reader = Reader::new(
+            1,
+            vec!["page".into(); 5],
+            0,
+            ReadingMode::Webtoon,
+            Fit::Width,
+        );
+        reader.viewport = 450.0;
+        assert_eq!(reader.visible(), 0..1);
+        let original = Decoded {
+            width: 2,
+            height: 3,
+            rgba: Arc::new(vec![255; 24]),
+        };
+        reader.images.insert(
+            1,
+            PageImage {
+                handle: original.handle(),
+                width: 2,
+                height: 3,
+                bytes: original.rgba.len(),
+                enhanced: false,
+                original: Some(original),
+            },
+        );
+        app.reader = Some(reader);
+        let _ = app.enhance_next();
+        assert!(app.reader.as_ref().unwrap().enhancing.contains(&1));
+    }
+
     fn fixture(root: &std::path::Path) -> App {
         let store = Arc::new(Store::open(root).unwrap());
         let settings = Settings {
@@ -2308,6 +3063,191 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn chapter_preferences_persist_per_series_and_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::Open(1));
+        assert!(app.chapter_options.deduplicate);
+        let _ = app.update(Message::ChapterGroup(crate::chapter_list::Group::Named(
+            "Gamma".into(),
+        )));
+        app.chapter_page = 3;
+        app.chapter_selection.insert(11);
+        let _ = app.update(Message::ChapterDeduplicate(false));
+        assert_eq!(app.chapter_page, 0);
+        assert!(app.chapter_selection.is_empty());
+
+        let _ = app.update(Message::Open(2));
+        assert!(app.chapter_options.deduplicate);
+        assert!(app.chapter_options.preferred_group.is_none());
+
+        let mut restored = app_from_store(app.store.clone());
+        let _ = restored.update(Message::Open(1));
+        assert!(!restored.chapter_options.deduplicate);
+        assert_eq!(
+            restored.chapter_options.preferred_group.as_deref(),
+            Some("Gamma")
+        );
+
+        restored.settings.username = "another-account".into();
+        restored.save();
+        let mut other = app_from_store(app.store.clone());
+        let _ = other.update(Message::Open(1));
+        assert!(other.chapter_options.deduplicate);
+        assert!(other.chapter_options.preferred_group.is_none());
+    }
+
+    #[test]
+    fn chapter_filters_and_bulk_selection_use_deduplicated_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::Open(1));
+        app.chapters = vec![
+            Chapter {
+                id: 11,
+                chapter_number: 1.0,
+                scanlator: Some("A".into()),
+                ..Default::default()
+            },
+            Chapter {
+                id: 12,
+                chapter_number: 1.0,
+                scanlator: Some("B".into()),
+                is_read: true,
+                ..Default::default()
+            },
+            Chapter {
+                id: 13,
+                chapter_number: 2.0,
+                scanlator: Some("A".into()),
+                ..Default::default()
+            },
+            Chapter {
+                id: 14,
+                chapter_number: 3.0,
+                scanlator: Some("A".into()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(
+            app.filtered_chapters()
+                .iter()
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            [12, 13, 14]
+        );
+        let _ = app.update(Message::ChapterUnread(true));
+        let _ = app.update(Message::ChapterSearch("2".into()));
+        let _ = app.update(Message::SelectUnreadChapters);
+        assert_eq!(app.chapter_selection, HashSet::from([13]));
+        let _ = app.update(Message::ChapterDeduplicate(false));
+        assert_eq!(app.chapters.len(), 4);
+        assert!(app.chapters[1].is_read);
+    }
+
+    #[test]
+    fn continuous_reader_skips_duplicates_and_ignores_list_filters() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        app.chapters = vec![
+            Chapter {
+                id: 11,
+                chapter_number: 1.0,
+                scanlator: Some("A".into()),
+                ..Default::default()
+            },
+            Chapter {
+                id: 12,
+                chapter_number: 1.0,
+                scanlator: Some("B".into()),
+                ..Default::default()
+            },
+            Chapter {
+                id: 13,
+                chapter_number: 2.0,
+                scanlator: Some("B".into()),
+                ..Default::default()
+            },
+        ];
+        app.chapter_search = "no matches".into();
+        app.chapter_unread = true;
+        app.chapter_reverse = true;
+        app.reader = Some(Reader::new(
+            11,
+            vec!["page".into()],
+            0,
+            ReadingMode::Webtoon,
+            Fit::Width,
+        ));
+        let _ = app.load_pages();
+        assert_eq!(app.reader.as_ref().unwrap().append_loading, Some(13));
+    }
+
+    #[tokio::test]
+    async fn all_titles_categories_filter_search_but_keep_category_tabs_and_browse() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        assert_eq!(app.filtered().len(), 3);
+        app.grid_page = 2;
+        let _ = app.update(Message::CategoryInAllTitles(7, false));
+        assert_eq!(app.grid_page, 0);
+        assert_eq!(
+            app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(),
+            [3, 2]
+        );
+
+        let _ = app.update(Message::Search("hidden".into()));
+        assert!(app.filtered().is_empty());
+        let _ = app.update(Message::Shelf(Some(7)));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [1]);
+        let _ = app.update(Message::Shelf(Some(9)));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [1]);
+
+        app.browse = app.library.clone();
+        app.screen = Screen::Browse;
+        assert_eq!(app.filtered().len(), 3);
+        app.screen = Screen::Library;
+        let _ = app.update(Message::Shelf(None));
+        let _ = app.update(Message::Search(String::new()));
+        let _ = app.update(Message::CategoryInAllTitles(42, false));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+        let _ = app.update(Message::CategoryInAllTitles(9, false));
+        assert!(app.filtered().is_empty());
+        let _ = app.update(Message::CategoryInAllTitles(7, true));
+        assert!(app.filtered().is_empty());
+        let _ = app.update(Message::CategoryInAllTitles(9, true));
+        assert_eq!(app.filtered().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn all_titles_categories_persist_offline_and_follow_the_connected_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::CategoryInAllTitles(7, false));
+        let _ = app.update(Message::CategoryInAllTitles(42, false));
+        let mut app = app_from_store(Arc::new(Store::open(dir.path()).unwrap()));
+        assert_eq!(app.all_titles_excluded, HashSet::from([7, 42]));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+        let _ = app.update(Message::ClearLibraryFilters);
+        let _ = app.update(Message::ShowHiddenCategories(true));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+
+        let old_username = app.settings.username.clone();
+        app.settings.username = "another-account".into();
+        let _ = app.update(Message::Connect);
+        assert!(app.all_titles_excluded.is_empty());
+        let _ = app.update(Message::Connected(
+            app.session,
+            Err("fixture offline".into()),
+        ));
+        let _ = app.update(Message::CategoryInAllTitles(9, false));
+        app.settings.username = old_username;
+        let _ = app.update(Message::Connect);
+        assert_eq!(app.all_titles_excluded, HashSet::from([7, 42]));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+    }
+
+    #[tokio::test]
     async fn hidden_categories_persist_and_filter_overlapping_and_uncategorized_titles() {
         let dir = tempfile::tempdir().unwrap();
         let mut app = fixture(dir.path());
@@ -2317,7 +3257,10 @@ mod tests {
         assert_eq!(app.shelf, None);
         assert_eq!(app.filtered().len(), 2);
         app.search = "Hidden".into();
-        assert!(app.filtered().is_empty());
+        assert_eq!(
+            app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![1]
+        );
         let mut app = app_from_store(Arc::new(Store::open(dir.path()).unwrap()));
         assert!(app.hidden_categories.contains(&7));
         app.shelf = Some(9);
@@ -2353,6 +3296,83 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(old.contains(&7));
+    }
+
+    #[test]
+    fn hidden_titles_appear_only_in_matching_nonblank_searches() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::HideCategory(7, true));
+        let _ = app.update(Message::HideCategory(42, true));
+        for (query, expected) in [
+            ("", vec![2]),
+            ("  \t ", vec![2]),
+            (" hIDden ", vec![1]),
+            ("uncategorized", vec![3]),
+            ("visible", vec![2]),
+            ("does not exist", vec![]),
+        ] {
+            let _ = app.update(Message::Search(query.into()));
+            assert_eq!(
+                app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(),
+                expected
+            );
+        }
+        let _ = app.update(Message::Search(String::new()));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+    }
+
+    #[test]
+    fn showing_hidden_categories_is_temporary_and_resettable() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::HideCategory(7, true));
+        let _ = app.update(Message::HideCategory(42, true));
+        let scope = app.engine.as_ref().unwrap().server.scope.clone();
+        let _ = app.update(Message::ShowHiddenCategories(true));
+        assert_eq!(app.filtered().len(), 3);
+        let _ = app.update(Message::Shelf(Some(7)));
+        assert_eq!(app.shelf, Some(7));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [1]);
+        let _ = app.update(Message::ShowHiddenCategories(false));
+        assert_eq!(app.shelf, None);
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+
+        let _ = app.update(Message::ShowHiddenCategories(true));
+        let _ = app.update(Message::Shelf(Some(42)));
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [3]);
+        let _ = app.update(Message::ClearLibraryFilters);
+        assert!(!app.show_hidden_categories);
+        assert_eq!(app.shelf, None);
+        assert_eq!(app.filtered().iter().map(|m| m.id).collect::<Vec<_>>(), [2]);
+        let _ = app.update(Message::ShowHiddenCategories(true));
+        let restarted = app_from_store(app.store.clone());
+        assert!(!restarted.show_hidden_categories);
+        assert_eq!(
+            restarted
+                .filtered()
+                .iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>(),
+            [2]
+        );
+        let saved: HashSet<i64> = app.store.get(&scope, "hidden_categories").unwrap().unwrap();
+        assert_eq!(saved, HashSet::from([7, 42]));
+    }
+
+    #[test]
+    fn history_does_not_restore_a_hidden_category_after_override_is_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = fixture(dir.path());
+        let _ = app.update(Message::HideCategory(7, true));
+        let _ = app.update(Message::ShowHiddenCategories(true));
+        let _ = app.update(Message::Shelf(Some(7)));
+        let _ = app.update(Message::Open(1));
+        let _ = app.update(Message::ShowHiddenCategories(false));
+        let _ = app.update(Message::Navigate(-1));
+        assert_eq!(app.screen, Screen::Library);
+        assert_eq!(app.shelf, None);
+        assert!(app.filtered().iter().all(|m| m.id != 1));
     }
 
     #[tokio::test]

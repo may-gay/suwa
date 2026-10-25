@@ -12,8 +12,9 @@ pub const DISPLAY: Font = Font {
 pub const LAVENDER: Color = Color::from_rgb8(200, 164, 232);
 pub const BLUSH: Color = Color::from_rgb8(240, 168, 200);
 pub const MINT: Color = Color::from_rgb8(160, 224, 200);
-pub fn reader_chrome_height(expanded: bool) -> f32 {
-    if expanded { 240.0 } else { 130.0 }
+pub const READER_TOP_BAR_HEIGHT: f32 = 60.0;
+pub fn reader_bottom_bar_height(expanded: bool) -> f32 {
+    if expanded { 270.0 } else { 64.0 }
 }
 
 pub struct Colors {

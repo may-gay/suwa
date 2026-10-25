@@ -18,8 +18,19 @@ cargo build --locked --release --features cuda
 
 The launcher uses the local CUDA runtime under `.local/gpu` when present. Runtime
 files are excluded from Git; set up ONNX Runtime, CUDA and cuDNN using the
-[GPU setup instructions](docs/performance.md). Rebuild after
-changing the source; the launcher only builds when the executable is missing.
+[GPU setup instructions](docs/performance.md). The launcher checks for source
+changes and rebuilds when needed.
+
+To add Suwa to your application runner from this checkout:
+
+```sh
+python3 scripts/install-desktop.py
+```
+
+This installs `~/.local/share/applications/app.suwa.Suwa.desktop` (or uses
+`XDG_DATA_HOME` when set). It launches `scripts/run.sh` from this checkout, so
+source changes are built before Suwa opens and each launch uses the latest build.
+Run the installer again if you move the checkout.
 
 For the native reader without neural enhancement:
 
@@ -53,12 +64,31 @@ chapter, or use **Edit** to select chapters and **Download on server**. The side
 previously saved local chapters are retained, but local-download controls and
 background local downloading have been removed.
 
-In **Settings → Categories**, enable **Hide category and its manga** to remove that category
-tab and its manga from your library, including library search and other category
-tabs. A title in multiple categories is hidden if any one of them is hidden.
-Uncheck the option there to restore them. These preferences are local to
-each server account, persist offline, and leave server categories and downloads
-intact. Source browsing and server history remain available.
+Chapter lists deduplicate releases by default. Under **Edit**, use **Deduplicate
+chapters** to show or hide duplicates and **Preferred release group** to choose a
+scanlator. Automatic selection prefers the group covering the most distinct
+chapters and fills gaps from other groups. Read and in-progress copies take
+priority so you keep your place. The chapter list, continue reading, and reader
+navigation all use this selection. Preferences are saved per series and server
+account. For example, Anything! Okay's 72 entries become 40 chapters, using Gamma
+for all 40 with automatic selection.
+
+In **Settings → Categories**, enable **Hide category and its manga** to hide that
+category tab and its manga from normal library browsing. A title in multiple
+categories is hidden if any one of them is hidden. Searching your library still
+shows matching hidden titles. **Filter → Show hidden categories** temporarily
+reveals hidden category tabs and their manga; turn it off, reset filters, or
+restart Suwa to hide them again. Hidden category preferences are saved locally
+per server account and work offline.
+
+Each category also has **Show in All titles**. Uncheck it to leave that category's
+series out of the **All titles** tab, including searches within that tab. Its own
+category tab stays available. A series in any unchecked category is excluded,
+even if it also belongs to a checked category. The default category controls
+uncategorized series. All categories are included initially; new categories are
+included automatically. These selections are saved locally per server account,
+work offline, and remain in effect when resetting filters or showing hidden
+categories. Source browsing is unaffected.
 
 Thumbnails support JPEG, PNG, WebP, GIF, and AVIF. **Retry covers** retries failed
 thumbnails; invalid cached images are discarded so a retry can fetch a fresh copy.
@@ -70,7 +100,9 @@ license, and download size. Use **Install and use** for an optional model or
 **Use this model** for installed weights. The choice persists across restarts.
 Downloads run off the UI thread, support cancellation, verify SHA-256, and publish
 weights atomically. Original pages appear first while CUDA enhancement runs in
-the background.
+the background. The reader enhances visible pages first, then up to the next
+three pages by default as they load. Settings → Reading adjusts the lookahead;
+it does not process a whole chapter at once.
 
 There are 11 presets: bundled waifu2x Fast, CUnet, SwinUNet Art and Scan,
 MangaJaNai Auto, IllustrationJaNai Denoise and Detail, Real-ESRGAN Anime 6B and
@@ -106,8 +138,16 @@ and other selected theme presets are preserved.
 
 ## Controls
 
+- Scroll through the full library. Mouse Back and Forward buttons and browser
+  Back and Forward keys move through visited screens.
 - Arrow keys, Page Up / Page Down, and Space navigate pages or scroll webtoons.
+- In webtoon mode, each mouse-wheel step moves about 180 pixels with a short
+  glide; touchpad scrolling gets a smaller boost and keeps its fine control.
+- Middle-click in webtoon mode to autoscroll. Move farther up or down to change
+  speed; middle-click again, click another button, or press Escape to stop.
 - F11 toggles fullscreen. H hides reader controls. Escape leaves the reader.
+- When controls are hidden, hover at the top or bottom edge to slide that bar
+  back in. Reader options include a compact model picker and install control.
 - The reader offers right-to-left, left-to-right, vertical pages, webtoon, and
   webtoon with gaps; fit, zoom, and two-page controls are available in the toolbar.
 - Webtoon reading continues into the next chapter and records chapter-local
@@ -159,7 +199,7 @@ enhanced pages are held in memory. Source preference credentials are sent to
 Suwayomi and are not saved by Suwa.
 
 `packaging/PKGBUILD` builds from this local checkout. From `packaging`, use
-`makepkg` to create an Arch package. The desktop file and SVG icon are included.
+`makepkg` to create an Arch package. The desktop file and puppy PNG icon are included.
 The package does not bundle CUDA or ONNX Runtime. Packaging has not yet received a
 clean-machine install test.
 

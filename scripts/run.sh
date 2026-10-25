@@ -12,7 +12,5 @@ elif [[ -f "$PWD/.local/models/cunet-2x.json" ]]; then
     export SUWA_DEFAULT_MODEL="$PWD/.local/models/cunet-2x.json"
 fi
 export SUWA_MODEL_DIR="$PWD/.local/models"
-if [[ ! -x target/release/suwa ]]; then
-    cargo build --locked --release --features cuda
-fi
+cargo build --locked --release --features cuda
 exec target/release/suwa "$@"
